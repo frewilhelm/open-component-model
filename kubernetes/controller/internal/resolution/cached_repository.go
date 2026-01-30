@@ -3,6 +3,7 @@ package resolution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 
@@ -11,6 +12,7 @@ import (
 
 	"ocm.software/open-component-model/bindings/go/blob"
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
+	"ocm.software/open-component-model/bindings/go/plugin/manager/registries/signinghandler"
 	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	"ocm.software/open-component-model/kubernetes/controller/internal/configuration"
@@ -21,11 +23,13 @@ import (
 // It wraps a real repository and uses a worker pool to handle concurrent access with caching.
 // This is a READ-ONLY cache. Writing operations are not cached.
 type CacheBackedRepository struct {
-	spec       runtime.Typed
-	cfg        *configuration.Configuration
-	workerPool *workerpool.WorkerPool
-	repo       repository.ComponentVersionRepository
-	logger     *logr.Logger
+	spec            runtime.Typed
+	cfg             *configuration.Configuration
+	Signatures      map[string]string
+	SigningRegistry *signinghandler.SigningRegistry
+	workerPool      *workerpool.WorkerPool
+	repo            repository.ComponentVersionRepository
+	logger          *logr.Logger
 	// requesterFunc is used to get a collection of types.NamespacedNames that want to listen to reconcile events
 	// that the cache handles. Upon an event ( resolution complete regardless of outcome ) all objects in this
 	// list are notified which will trigger a new reconcile event.
@@ -62,23 +66,29 @@ func (c *CacheBackedRepository) GetComponentVersion(ctx context.Context, compone
 
 	// create our key function that the cache will use to determine the key for this request
 	keyFunc := func() (string, error) {
-		return buildCacheKey(configHash, c.spec, component, version)
+		return buildCacheKey(configHash, c.spec, component, version, c.Signatures)
 	}
 
 	wpOpts := workerpool.ResolveOptions{
-		Component:  component,
-		Version:    version,
-		Repository: c.repo,
-		KeyFunc:    keyFunc,
-		Requester:  c.requesterFunc(),
+		Component:       component,
+		Version:         version,
+		Signatures:      c.Signatures,
+		SigningRegistry: c.SigningRegistry,
+		Repository:      c.repo,
+		KeyFunc:         keyFunc,
+		Requester:       c.requesterFunc(),
 	}
 
-	result, err := c.workerPool.GetComponentVersion(ctx, wpOpts)
+	desc, err := c.workerPool.GetComponentVersion(ctx, wpOpts)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, workerpool.ErrNotSafelyDigestible) {
+			return desc, err
+		} else {
+			return nil, err
+		}
 	}
 
-	return result, nil
+	return desc, nil
 }
 
 // ListComponentVersions lists all versions of a component, using the cache when possible.
@@ -120,10 +130,11 @@ func (c *CacheBackedRepository) CheckHealth(ctx context.Context) error {
 	return checkable.CheckHealth(ctx)
 }
 
-// buildCacheKey generates a cache key from the configuration hash, repository spec, component, and version.
+// buildCacheKey generates a cache key from the configuration hash, repository spec, component, version and potential
+// signatures.
 // It canonicalizes the repository spec using JCS (RFC 8785) before hashing to ensure consistent keys
 // regardless of field ordering in the JSON representation.
-func buildCacheKey(configHash []byte, repoSpec runtime.Typed, component, version string) (string, error) {
+func buildCacheKey(configHash []byte, repoSpec runtime.Typed, component, version string, signatures map[string]string) (string, error) {
 	repoJSON, err := json.Marshal(repoSpec)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal repository spec: %w", err)
@@ -140,6 +151,10 @@ func buildCacheKey(configHash []byte, repoSpec runtime.Typed, component, version
 	_, _ = hasher.Write(canonicalJSON)
 	_, _ = hasher.Write([]byte(component))
 	_, _ = hasher.Write([]byte(version))
+	for name, signature := range signatures {
+		_, _ = hasher.Write([]byte(name))
+		_, _ = hasher.Write([]byte(signature))
+	}
 
 	return fmt.Sprintf("%016x", hasher.Sum64()), nil
 }

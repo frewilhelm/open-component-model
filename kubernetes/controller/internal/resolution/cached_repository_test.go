@@ -23,10 +23,10 @@ func TestBuildCacheKeyHashKeyGeneration(t *testing.T) {
 			BaseUrl: "localhost:5000/test",
 		}
 
-		key1, err := buildCacheKey(configHash, spec1, component, version)
+		key1, err := buildCacheKey(configHash, spec1, component, version, nil)
 		require.NoError(t, err)
 
-		key2, err := buildCacheKey(configHash, spec2, component, version)
+		key2, err := buildCacheKey(configHash, spec2, component, version, nil)
 		require.NoError(t, err)
 
 		assert.Equal(t, key1, key2, "cache keys should be identical for same spec")
@@ -45,10 +45,10 @@ func TestBuildCacheKeyHashKeyGeneration(t *testing.T) {
 			BaseUrl: "localhost:5000/test2",
 		}
 
-		key1, err := buildCacheKey(configHash, spec1, component, version)
+		key1, err := buildCacheKey(configHash, spec1, component, version, nil)
 		require.NoError(t, err)
 
-		key2, err := buildCacheKey(configHash, spec2, component, version)
+		key2, err := buildCacheKey(configHash, spec2, component, version, nil)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, key1, key2, "cache keys should differ for different specs")
@@ -60,10 +60,10 @@ func TestBuildCacheKeyHashKeyGeneration(t *testing.T) {
 			BaseUrl: "localhost:5000/test",
 		}
 
-		key1, err := buildCacheKey(configHash, spec, "component1", "v1.0.0")
+		key1, err := buildCacheKey(configHash, spec, "component1", "v1.0.0", nil)
 		require.NoError(t, err)
 
-		key2, err := buildCacheKey(configHash, spec, "component2", "v1.0.0")
+		key2, err := buildCacheKey(configHash, spec, "component2", "v1.0.0", nil)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, key1, key2, "cache keys should differ for different components")
@@ -76,10 +76,10 @@ func TestBuildCacheKeyHashKeyGeneration(t *testing.T) {
 		}
 		component := "test-component"
 
-		key1, err := buildCacheKey(configHash, spec, component, "v1.0.0")
+		key1, err := buildCacheKey(configHash, spec, component, "v1.0.0", nil)
 		require.NoError(t, err)
 
-		key2, err := buildCacheKey(configHash, spec, component, "v2.0.0")
+		key2, err := buildCacheKey(configHash, spec, component, "v2.0.0", nil)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, key1, key2, "cache keys should differ for different versions")
@@ -92,10 +92,10 @@ func TestBuildCacheKeyHashKeyGeneration(t *testing.T) {
 		component := "test-component"
 		version := "v1.0.0"
 
-		key1, err := buildCacheKey([]byte("config1"), spec, component, version)
+		key1, err := buildCacheKey([]byte("config1"), spec, component, version, nil)
 		require.NoError(t, err)
 
-		key2, err := buildCacheKey([]byte("config2"), spec, component, version)
+		key2, err := buildCacheKey([]byte("config2"), spec, component, version, nil)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, key1, key2, "cache keys should differ for different config hashes")
@@ -109,7 +109,7 @@ func TestBuildCacheKeyHashKeyGeneration(t *testing.T) {
 		component := "test-component"
 		version := "v1.0.0"
 
-		key, err := buildCacheKey(configHash, spec, component, version)
+		key, err := buildCacheKey(configHash, spec, component, version, nil)
 		require.NoError(t, err)
 
 		assert.Len(t, key, 16, "FNV-1a 64-bit hash should produce 16 hex characters")

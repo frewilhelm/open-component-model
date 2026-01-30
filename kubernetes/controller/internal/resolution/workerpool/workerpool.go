@@ -3,6 +3,7 @@ package workerpool
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sync"
 	"time"
@@ -11,9 +12,13 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
+	"ocm.software/open-component-model/bindings/go/plugin/manager/registries/signinghandler"
 	"ocm.software/open-component-model/bindings/go/repository"
+	signingv1alpha1 "ocm.software/open-component-model/bindings/go/rsa/signing/v1alpha1"
+	"ocm.software/open-component-model/bindings/go/signing"
 )
 
 // RequesterInfo contains information about the object requesting resolution.
@@ -21,12 +26,16 @@ type RequesterInfo struct {
 	NamespacedName types.NamespacedName
 }
 
+var ErrNotSafelyDigestible = fmt.Errorf("component version is not safely digestible")
+
 // ResolveOptions contains all the options the resolution service requires to perform a resolve operation.
 type ResolveOptions struct {
-	Component  string
-	Version    string
-	Repository repository.ComponentVersionRepository
-	KeyFunc    func() (string, error)
+	Component       string
+	Version         string
+	Repository      repository.ComponentVersionRepository
+	Signatures      map[string]string
+	SigningRegistry *signinghandler.SigningRegistry
+	KeyFunc         func() (string, error)
 	// Requester is the information about the object requesting this resolution.
 	// It will be notified when the resolution completes.
 	Requester RequesterInfo
@@ -345,10 +354,61 @@ func (wp *WorkerPool) setResult(key string, result any, err error) []RequesterIn
 
 // getComponentVersion performs the actual component version resolution.
 func (wp *WorkerPool) getComponentVersion(ctx context.Context, opts ResolveOptions) (any, error) {
-	descriptor, err := opts.Repository.GetComponentVersion(ctx, opts.Component, opts.Version)
+	logger := log.FromContext(ctx)
+
+	desc, err := opts.Repository.GetComponentVersion(ctx, opts.Component, opts.Version)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get component version %s:%s: %w", opts.Component, opts.Version, err)
 	}
 
-	return descriptor, nil
+	if err := signing.IsSafelyDigestible(&desc.Component); err != nil {
+		return desc, ErrNotSafelyDigestible
+	}
+
+	if len(opts.Signatures) > 0 {
+		for name, signature := range opts.Signatures {
+			var descSig *descriptor.Signature
+			for i := range desc.Signatures {
+				if desc.Signatures[i].Name == name {
+					descSig = &desc.Signatures[i]
+					break
+				}
+			}
+
+			if descSig == nil {
+				return nil, fmt.Errorf("signature %s not found in component %s", name, opts.Component)
+			}
+
+			if err := signing.VerifyDigestMatchesDescriptor(ctx, desc, *descSig, slog.New(logr.ToSlogHandler(logger))); err != nil {
+				return nil, fmt.Errorf("digest verification failed for signature %q: %w", descSig.Name, err)
+			}
+
+			cfg := &signingv1alpha1.Config{
+				SignatureAlgorithm: signingv1alpha1.SignatureAlgorithm(descSig.Signature.Algorithm),
+			}
+
+			signingHandler, err := opts.SigningRegistry.GetPlugin(ctx, cfg)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get signing handler plugin: %w", err)
+			}
+
+			var key string
+			switch signingv1alpha1.SignatureAlgorithm(descSig.Signature.Algorithm) {
+			case signingv1alpha1.AlgorithmRSASSAPSS, signingv1alpha1.AlgorithmRSASSAPKCS1V15:
+				key = "public_key_pem"
+			default:
+				return nil, fmt.Errorf("unsupported signature algorithm: %q", descSig.Signature.Algorithm)
+			}
+
+			credentials := map[string]string{
+				key: signature,
+			}
+
+			if err := signingHandler.Verify(ctx, *descSig, cfg, credentials); err != nil {
+				return nil, fmt.Errorf("signature verification failed for signature %s: %w", name, err)
+			}
+		}
+	}
+
+	return desc, nil
 }
