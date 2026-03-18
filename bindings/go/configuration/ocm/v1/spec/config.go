@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"reflect"
@@ -111,11 +112,11 @@ type Resolver struct {
 // Deprecated: Resolvers are deprecated and are only added for backwards
 // compatibility.
 // New concepts will likely be introduced in the future (contributions welcome!).
-func Lookup(cfg *genericv1.Config) (*Config, error) {
+func Lookup(ctx context.Context, cfg *genericv1.Config) (*Config, error) {
 	if cfg == nil {
 		return nil, nil
 	}
-	cfg, err := genericv1.Filter(cfg, &genericv1.FilterOptions{
+	cfg, err := genericv1.Filter(ctx, cfg, &genericv1.FilterOptions{
 		ConfigTypes: []runtime.Type{
 			runtime.NewVersionedType(ConfigType, Version),
 			runtime.NewUnversionedType(ConfigType),

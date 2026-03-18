@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"context"
 	"fmt"
 
 	v1 "ocm.software/open-component-model/bindings/go/configuration/generic/v1/spec"
@@ -49,10 +50,10 @@ type Rule struct {
 }
 
 // LookupConfig creates a new extract configuration from a central V1 config.
-func LookupConfig(cfg *v1.Config) (*Config, error) {
+func LookupConfig(ctx context.Context, cfg *v1.Config) (*Config, error) {
 	var merged *Config
 	if cfg != nil {
-		cfg, err := v1.Filter(cfg, &v1.FilterOptions{
+		cfg, err := v1.Filter(ctx, cfg, &v1.FilterOptions{
 			ConfigTypes: []runtime.Type{
 				runtime.NewVersionedType(ConfigType, Version),
 				runtime.NewUnversionedType(ConfigType),

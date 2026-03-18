@@ -192,7 +192,7 @@ func TestLookupCredentialConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := LookupCredentialConfig(tt.config)
+			result, err := LookupCredentialConfig(t.Context(), tt.config)
 			if tt.expectedErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedErr)

@@ -101,7 +101,7 @@ func TestFilter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Filter(tt.args.config, tt.args.options)
+			got, err := Filter(t.Context(), tt.args.config, tt.args.options)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Filter() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -222,7 +222,7 @@ func TestFilterForType(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := FilterForType[*testConfig](tt.args.scheme, tt.args.config)
+			got, err := FilterForType[*testConfig](t.Context(), tt.args.scheme, tt.args.config)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("FilterForType() error = %v, wantErr %v", err, tt.wantErr)
 				return

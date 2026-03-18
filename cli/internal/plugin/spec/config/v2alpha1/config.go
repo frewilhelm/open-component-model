@@ -1,6 +1,7 @@
 package v2alpha1
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,10 +66,10 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 }
 
 // LookupConfig creates a new plugin configuration from a central V1 config.
-func LookupConfig(cfg *generic.Config) (*Config, error) {
+func LookupConfig(ctx context.Context, cfg *generic.Config) (*Config, error) {
 	var merged *Config
 	if cfg != nil {
-		cfg, err := generic.Filter(cfg, &generic.FilterOptions{
+		cfg, err := generic.Filter(ctx, cfg, &generic.FilterOptions{
 			ConfigTypes: []runtime.Type{
 				runtime.NewVersionedType(ConfigType, Version),
 				runtime.NewUnversionedType(ConfigType),

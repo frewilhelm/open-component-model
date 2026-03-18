@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
@@ -33,7 +34,7 @@ func overrideWorkingDirectory(cmd *cobra.Command, fsCfg *filesystemv1alpha1.Conf
 func ensureFilesystemConfig(cmd *cobra.Command, cfg *genericv1.Config, fsCfg *filesystemv1alpha1.Config) {
 	// If we have a CLI flag but no filesystem config in the config,
 	// we need to add it to the configuration
-	if cfg != nil && !hasFilesystemConfig(cfg) {
+	if cfg != nil && !hasFilesystemConfig(cmd.Context(), cfg) {
 		if err := addFilesystemConfigToCentralConfig(cmd, fsCfg); err != nil {
 			slog.WarnContext(cmd.Context(), "could not add filesystem config to central configuration", slog.String("error", err.Error()))
 		}
@@ -54,7 +55,7 @@ func FilesystemConfig(cmd *cobra.Command, opts FilesystemConfigOptions) {
 		slog.WarnContext(cmd.Context(), "could not get configuration to initialize filesystem config")
 		fsCfg = &filesystemv1alpha1.Config{}
 	} else {
-		if _fsCfg, err := filesystemv1alpha1.LookupConfig(cfg); err != nil {
+		if _fsCfg, err := filesystemv1alpha1.LookupConfig(cmd.Context(), cfg); err != nil {
 			slog.DebugContext(cmd.Context(), "could not get filesystem configuration", slog.String("error", err.Error()))
 			fsCfg = &filesystemv1alpha1.Config{}
 		} else {
@@ -85,14 +86,14 @@ func FilesystemConfig(cmd *cobra.Command, opts FilesystemConfigOptions) {
 
 // hasFilesystemConfig checks if the central configuration already contains filesystem configuration
 // It uses the Config Filter function to handle versioned configurations properly
-func hasFilesystemConfig(cfg *genericv1.Config) bool {
+func hasFilesystemConfig(ctx context.Context, cfg *genericv1.Config) bool {
 	if cfg == nil {
 		return false
 	}
 
 	// Use the Config Filter function to find filesystem configurations
 	// This handles both versioned and unversioned configurations
-	filtered, err := genericv1.Filter(cfg, &genericv1.FilterOptions{
+	filtered, err := genericv1.Filter(ctx, cfg, &genericv1.FilterOptions{
 		ConfigTypes: []runtime.Type{
 			runtime.NewVersionedType(filesystemv1alpha1.ConfigType, filesystemv1alpha1.Version),
 			runtime.NewUnversionedType(filesystemv1alpha1.ConfigType),

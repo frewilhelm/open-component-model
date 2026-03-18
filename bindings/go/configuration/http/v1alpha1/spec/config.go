@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -74,10 +75,10 @@ type Config struct {
 }
 
 // LookupConfig creates an HTTP configuration from a central generic V1 config.
-func LookupConfig(cfg *genericv1.Config) (*Config, error) {
+func LookupConfig(ctx context.Context, cfg *genericv1.Config) (*Config, error) {
 	var merged *Config
 	if cfg != nil {
-		cfg, err := genericv1.Filter(cfg, &genericv1.FilterOptions{
+		cfg, err := genericv1.Filter(ctx, cfg, &genericv1.FilterOptions{
 			ConfigTypes: []runtime.Type{
 				runtime.NewVersionedType(ConfigType, Version),
 				runtime.NewUnversionedType(ConfigType),

@@ -256,7 +256,7 @@ func (pm *PluginManager) addPlugin(ctx context.Context, ocmConfig *genericv1.Con
 	}
 
 	if ocmConfig != nil {
-		filtered, _ := genericv1.Filter(ocmConfig, &genericv1.FilterOptions{ConfigTypes: pluginSpec.SupportedConfigTypes})
+		filtered, _ := genericv1.Filter(ctx, ocmConfig, &genericv1.FilterOptions{ConfigTypes: pluginSpec.SupportedConfigTypes})
 		if len(pluginSpec.SupportedConfigTypes) > 0 && len(filtered.Configurations) == 0 {
 			return fmt.Errorf("no configuration found for plugin %s; requested configuration types: %s", plugin.ID, pluginSpec.SupportedConfigTypes)
 		}

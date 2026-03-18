@@ -391,7 +391,7 @@ func TestHasFilesystemConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := hasFilesystemConfig(tt.config)
+			result := hasFilesystemConfig(t.Context(), tt.config)
 			require.Equal(t, tt.expected, result)
 		})
 	}

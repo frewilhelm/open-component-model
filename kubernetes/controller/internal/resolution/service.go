@@ -141,7 +141,7 @@ func (r *Resolver) createResolver(ctx context.Context, spec runtime.Typed, cfg *
 		r.logger.V(1).Info("resolved credential graph")
 		opts.CredentialGraph = credGraph
 
-		fallbackResolvers, pathMatchers, err := resolvers.ExtractResolvers(cfg.Config, ocirepository.Scheme)
+		fallbackResolvers, pathMatchers, err := resolvers.ExtractResolvers(ctx, cfg.Config, ocirepository.Scheme)
 		if err != nil {
 			return nil, err
 		}

@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"context"
 	"fmt"
 
 	genericv1 "ocm.software/open-component-model/bindings/go/configuration/generic/v1/spec"
@@ -79,11 +80,11 @@ type Resolver struct {
 }
 
 // Lookup creates a new Config from a central V1 config.
-func Lookup(cfg *genericv1.Config) (*Config, error) {
+func Lookup(ctx context.Context, cfg *genericv1.Config) (*Config, error) {
 	if cfg == nil {
 		return nil, nil
 	}
-	cfg, err := genericv1.Filter(cfg, &genericv1.FilterOptions{
+	cfg, err := genericv1.Filter(ctx, cfg, &genericv1.FilterOptions{
 		ConfigTypes: []runtime.Type{
 			runtime.NewVersionedType(ConfigType, Version),
 			runtime.NewUnversionedType(ConfigType),

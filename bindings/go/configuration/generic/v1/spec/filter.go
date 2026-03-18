@@ -1,7 +1,9 @@
 package spec
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"ocm.software/open-component-model/bindings/go/runtime"
@@ -14,7 +16,7 @@ type FilterOptions struct {
 // Filter filters the config based on the provided options.
 // Only the FilterOptions.ConfigTypes are copied over.
 // If none are specified, the config will be empty.
-func Filter(config *Config, options *FilterOptions) (*Config, error) {
+func Filter(ctx context.Context, config *Config, options *FilterOptions) (*Config, error) {
 	filtered := new(Config)
 	filtered.Type = config.Type
 
@@ -22,6 +24,8 @@ func Filter(config *Config, options *FilterOptions) (*Config, error) {
 		configType := entry.GetType()
 		if slices.Contains(options.ConfigTypes, configType) {
 			filtered.Configurations = append(filtered.Configurations, entry)
+		} else {
+			slog.DebugContext(ctx, "filtering out configuration type", "type", configType)
 		}
 	}
 
@@ -30,7 +34,7 @@ func Filter(config *Config, options *FilterOptions) (*Config, error) {
 
 // FilterForType filters the configuration for a specific configuration type T
 // and returns a slice of typed configurations.
-func FilterForType[T runtime.Typed](scheme *runtime.Scheme, config *Config) ([]T, error) {
+func FilterForType[T runtime.Typed](ctx context.Context, scheme *runtime.Scheme, config *Config) ([]T, error) {
 	typ, err := scheme.TypeForPrototype(*new(T))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create get type for prototype of type %T: %w", typ, err)
@@ -38,7 +42,7 @@ func FilterForType[T runtime.Typed](scheme *runtime.Scheme, config *Config) ([]T
 
 	types := append(scheme.GetTypes()[typ], typ) //nolint:gocritic // appendAssign to new variable should be safe here
 
-	filtered, err := Filter(config, &FilterOptions{
+	filtered, err := Filter(ctx, config, &FilterOptions{
 		ConfigTypes: types,
 	})
 	if err != nil {

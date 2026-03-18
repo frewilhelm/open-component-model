@@ -96,7 +96,7 @@ configurations:
 	repoProvider := provider.NewComponentVersionRepositoryProvider()
 	ocmconf, err := configuration.GetConfigFromPath(cfgPath)
 	r.NoError(err)
-	credconf, err := runtime.LookupCredentialConfig(ocmconf)
+	credconf, err := runtime.LookupCredentialConfig(ctx, ocmconf)
 	r.NoError(err)
 	credentialResolver, err := credentials.ToGraph(ctx, credconf, credentials.Options{
 		RepositoryPluginProvider: credentials.GetRepositoryPluginFn(func(ctx context.Context, typed ocmruntime.Typed) (credentials.RepositoryPlugin, error) {

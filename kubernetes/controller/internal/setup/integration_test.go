@@ -82,7 +82,7 @@ func TestIntegration_CompleteFlow(t *testing.T) {
 	require.NotNil(t, credGraph)
 
 	// Test new path matcher resolvers (v1alpha1)
-	resolversV1Alpha1, err := resolvers.PathMatcherResolversFromConfig(cfg.Config)
+	resolversV1Alpha1, err := resolvers.PathMatcherResolversFromConfig(t.Context(), cfg.Config)
 	require.NoError(t, err)
 	assert.Nil(t, resolversV1Alpha1, "empty config should have no resolvers")
 
@@ -399,7 +399,7 @@ func TestIntegration_ResolverProvider(t *testing.T) {
 			BaseUrl: "localhost:5000/priority",
 		}
 
-		configResolvers, err := resolvers.PathMatcherResolversFromConfig(cfg.Config)
+		configResolvers, err := resolvers.PathMatcherResolversFromConfig(t.Context(), cfg.Config)
 		require.NoError(t, err)
 
 		opts := resolvers.Options{

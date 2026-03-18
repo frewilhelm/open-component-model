@@ -1,6 +1,7 @@
 package resolvers
 
 import (
+	"context"
 	"fmt"
 
 	genericv1 "ocm.software/open-component-model/bindings/go/configuration/generic/v1/spec"
@@ -13,12 +14,12 @@ import (
 // PathMatcherResolversFromConfig extracts path matcher resolvers (v1alpha1) from a generic configuration.
 // It filters the configuration for entries of type [resolverspec.Config] and aggregates
 // all resolvers defined in these entries into a single list.
-func PathMatcherResolversFromConfig(config *genericv1.Config) ([]*resolverspec.Resolver, error) {
+func PathMatcherResolversFromConfig(ctx context.Context, config *genericv1.Config) ([]*resolverspec.Resolver, error) {
 	if config == nil || len(config.Configurations) == 0 {
 		return nil, nil
 	}
 
-	filtered, err := genericv1.FilterForType[*resolverspec.Config](resolverspec.Scheme, config)
+	filtered, err := genericv1.FilterForType[*resolverspec.Config](ctx, resolverspec.Scheme, config)
 	if err != nil {
 		return nil, fmt.Errorf("filtering configuration for resolver config failed: %w", err)
 	}
@@ -39,12 +40,12 @@ func PathMatcherResolversFromConfig(config *genericv1.Config) ([]*resolverspec.R
 // It filters the configuration for resolver configurations, merges them, and converts them to runtime format.
 //
 // Deprecated: Fallback resolvers are deprecated. Use PathMatcherResolversFromConfig instead.
-func FallbackResolversFromConfig(config *genericv1.Config, repositoryScheme *runtime.Scheme) ([]*resolverruntime.Resolver, error) {
+func FallbackResolversFromConfig(ctx context.Context, config *genericv1.Config, repositoryScheme *runtime.Scheme) ([]*resolverruntime.Resolver, error) {
 	if config == nil || len(config.Configurations) == 0 {
 		return nil, nil
 	}
 
-	filtered, err := genericv1.FilterForType[*resolverv1.Config](resolverv1.Scheme, config)
+	filtered, err := genericv1.FilterForType[*resolverv1.Config](ctx, resolverv1.Scheme, config)
 	if err != nil {
 		return nil, fmt.Errorf("filtering configuration for resolver config failed: %w", err)
 	}
@@ -74,17 +75,17 @@ func FallbackResolversFromConfig(config *genericv1.Config, repositoryScheme *run
 // Returns (fallbackResolvers, pathMatcherResolvers, error).
 //
 //nolint:staticcheck // compatibility mode for deprecated resolvers
-func ExtractResolvers(config *genericv1.Config, repoScheme *runtime.Scheme) ([]*resolverruntime.Resolver, []*resolverspec.Resolver, error) {
+func ExtractResolvers(ctx context.Context, config *genericv1.Config, repoScheme *runtime.Scheme) ([]*resolverruntime.Resolver, []*resolverspec.Resolver, error) {
 	if config == nil {
 		return nil, nil, nil
 	}
 
-	pathMatcherResolvers, err := PathMatcherResolversFromConfig(config)
+	pathMatcherResolvers, err := PathMatcherResolversFromConfig(ctx, config)
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting path matchers from configuration failed: %w", err)
 	}
 
-	fallbackResolvers, err := FallbackResolversFromConfig(config, repoScheme)
+	fallbackResolvers, err := FallbackResolversFromConfig(ctx, config, repoScheme)
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting fallback resolvers from configuration failed: %w", err)
 	}

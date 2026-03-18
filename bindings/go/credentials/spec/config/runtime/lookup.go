@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 
 	genericv1 "ocm.software/open-component-model/bindings/go/configuration/generic/v1/spec"
@@ -16,12 +17,12 @@ func init() {
 
 // LookupCredentialConfig extracts credential configuration from a generic configuration.
 // It filters the configuration for credential entries and merges them into a single config.
-func LookupCredentialConfig(config *genericv1.Config) (*Config, error) {
+func LookupCredentialConfig(ctx context.Context, config *genericv1.Config) (*Config, error) {
 	if config == nil || len(config.Configurations) == 0 {
 		return nil, nil
 	}
 
-	filtered, err := genericv1.Filter(config, &genericv1.FilterOptions{
+	filtered, err := genericv1.Filter(ctx, config, &genericv1.FilterOptions{
 		ConfigTypes: []runtime.Type{
 			runtime.NewVersionedType(credentialsv1.ConfigType, credentialsv1.Version),
 			runtime.NewUnversionedType(credentialsv1.ConfigType),

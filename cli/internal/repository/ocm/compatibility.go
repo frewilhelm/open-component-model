@@ -41,7 +41,7 @@ func NewComponentRepositoryResolver(
 		opt(options)
 	}
 
-	fallbackResolvers, pathMatchers, err := resolvers.ExtractResolvers(options.config, ocirepository.Scheme)
+	fallbackResolvers, pathMatchers, err := resolvers.ExtractResolvers(ctx, options.config, ocirepository.Scheme)
 	if err != nil {
 		return nil, err
 	}

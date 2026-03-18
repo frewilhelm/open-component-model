@@ -40,7 +40,7 @@ func PluginManager(cmd *cobra.Command) error {
 	if cfg := ocmctx.FromContext(cmd.Context()).Configuration(); cfg == nil {
 		slog.WarnContext(cmd.Context(), "could not get configuration to initialize plugin manager")
 	} else {
-		pluginCfg, err := v2alpha1.LookupConfig(cfg)
+		pluginCfg, err := v2alpha1.LookupConfig(cmd.Context(), cfg)
 		if err != nil {
 			return fmt.Errorf("could not get plugin configuration: %w", err)
 		}
@@ -119,7 +119,7 @@ func CredentialGraph(cmd *cobra.Command) error {
 	var err error
 	if cfg := ocmctx.FromContext(cmd.Context()).Configuration(); cfg == nil {
 		slog.WarnContext(cmd.Context(), "could not get configuration to initialize credential graph")
-	} else if credCfg, err = credentialsRuntime.LookupCredentialConfig(cfg); err != nil {
+	} else if credCfg, err = credentialsRuntime.LookupCredentialConfig(cmd.Context(), cfg); err != nil {
 		return fmt.Errorf("could not get credential configuration: %w", err)
 	}
 

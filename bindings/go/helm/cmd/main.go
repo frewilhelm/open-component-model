@@ -164,7 +164,7 @@ func parseFilesystemConfig(conf types.Config) (*filesystemv1alpha1.Config, error
 	}
 
 	// Use LookupConfig to get filesystem config with defaults
-	filesystemConfig, err := filesystemv1alpha1.LookupConfig(genericConfig)
+	filesystemConfig, err := filesystemv1alpha1.LookupConfig(context.Background(), genericConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup filesystem config: %w", err)
 	}
