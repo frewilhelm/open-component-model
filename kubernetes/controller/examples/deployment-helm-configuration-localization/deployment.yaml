@@ -1,0 +1,53 @@
+apiVersion: delivery.ocm.software/v1alpha1
+kind: OCMDeployment
+metadata:
+  name: deployment-helm-configuration-localization
+spec:
+  resources:
+    - id: ocirepository
+      template:
+        apiVersion: source.toolkit.fluxcd.io/v1
+        kind: OCIRepository
+        metadata:
+          name: deployment-helm-configuration-localization-oci-repository
+        spec:
+          interval: 1m0s
+          insecure: true
+          layerSelector:
+            mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+            operation: copy
+          # The first reference uses the full chain — this implicitly declares
+          # the repository + component for the resource() shorthand below.
+          url: >-
+            oci://${repoByRef("http://image-registry:5000",
+            {"type": "OCIRegistry", "interval": "10m"}).
+            componentByReference("ocm.software/ocm-k8s-toolkit/examples/deployment-helm-configuration-localization",
+            {"semver": "1.0.0", "interval": "10m"}).
+            resourceByIdentity({"name": "helm-resource"}).
+            toOCI().registry}/${resource("helm-resource").toOCI().repository}
+          ref:
+            digest: ${resource("helm-resource").toOCI().digest}
+
+    - id: helmrelease
+      template:
+        apiVersion: helm.toolkit.fluxcd.io/v2
+        kind: HelmRelease
+        metadata:
+          name: deployment-helm-configuration-localization-helm-release
+        spec:
+          releaseName: deployment-helm-configuration-localization
+          interval: 1m
+          timeout: 5m
+          chartRef:
+            kind: OCIRepository
+            name: ${ocirepository.metadata.name}
+            namespace: default
+          values:
+            # Localization — uses the resource() shorthand for image-resource
+            image:
+              repository: >-
+                ${resource("image-resource").toOCI().registry}/${resource("image-resource").toOCI().repository}
+              tag: ${resource("image-resource").toOCI().tag}
+            # Configuration
+            ui:
+              message: deployment-helm-configuration-localization

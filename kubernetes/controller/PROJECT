@@ -57,4 +57,13 @@ resources:
   kind: Deployer
   path: ocm.software/open-component-model/kubernetes/controller/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: ocm.software
+  group: delivery
+  kind: Deployment
+  path: ocm.software/open-component-model/kubernetes/controller/api/v1alpha1
+  version: v1alpha1
 version: "3"

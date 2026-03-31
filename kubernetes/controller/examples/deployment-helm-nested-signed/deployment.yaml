@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: helm-signing-secret
+data:
+  # Base64 encoded value of the public key ocm.software.pub
+  ocm.software: "LS0tLS1CRUdJTiBSU0EgUFVCTElDIEtFWS0tLS0tCk1JSUJDZ0tDQVFFQTE0UUhEdHlaVFJXbThCZDdoZjVkVnp1L3VhQ3JVSmU4UFhXc2M0U0ZEWjJuRWZWWmZ2Rm8KQXV4aFF6UzFjN2dEOVlmRDBTSnpKU0ZnbmNlY29EQTI5TTBPTFltd2ptQWZoajlBNm1YNm1JbXlienVPYU9vago0RkpabkpkM3JGek5Cb0t3cW9ld0lIUkIvb1R6ZDZIWDZmQUM1M2RyYW8vaDFoTWpFODFEcld5a1hSQmd2ekJpClZ6ZGd1N0ZleUxMVzZEVzE1VmZMdmlpL1RTVk9RT3FlTHdpc3hUR2JpNjdMYy8vVFRnQlZCRUg5NjU0MnB2bjAKUTVuRzVKa3hGVWY2ajBxM3lkM0lPVW9nUHZJbzNkcDllR1Q0b1VRTTNTSTdKcC9NRG5NNHEySkpjbERNL1pZTQpwWE5ub2VXWlQ3NEZ3QzdBcTdBWmxKSG9hRHVqVGdGSTR3SURBUUFCCi0tLS0tRU5EIFJTQSBQVUJMSUMgS0VZLS0tLS0K"
+---
+# Deployment with multi-level nesting AND signature verification.
+#
+# Component structure:
+#   helm-nested-signed (root, signed)
+#     ├── reference: "nested-signed-extended" → helm-nested-signed/extended
+#     │     └── reference: "nested-signed-rgd" → helm-nested-signed/rgd
+#     │           └── resource: kro-rgd (not used here)
+#     └── reference: "nested-signed-chart"   → helm-nested-signed/chart
+#           └── resource: helm-resource
+#
+# New CEL functions used:
+#   .withVerificationFromSecret("sig", "secret")
+#     Adds verification to the root Component CR.
+#
+#   .componentReference("ref-a", "ref-b")
+#     Follows a chain of component references (multi-level nesting).
+#     Each reference name is resolved from the parent's descriptor.
+#     Creates a Component CR for the final referenced component.
+#
+#   .componentReference("ref-a")
+#     Single-level nesting — creates a Component CR for the directly
+#     referenced component.
+apiVersion: delivery.ocm.software/v1alpha1
+kind: OCMDeployment
+metadata:
+  name: deployment-helm-nested-signed
+spec:
+  resources:
+    - id: ocirepository
+      template:
+        apiVersion: source.toolkit.fluxcd.io/v1
+        kind: OCIRepository
+        metadata:
+          name: deployment-helm-nested-signed-oci-repository
+        spec:
+          interval: 1m0s
+          insecure: true
+          layerSelector:
+            mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+            operation: copy
+          # Full chain: declares root component with verification, then
+          # navigates into nested-signed-chart to find the helm resource.
+          url: >-
+            oci://${repoByRef("http://image-registry:5000",
+            {"type": "OCIRegistry", "interval": "10m"}).
+            componentByReference("ocm.software/ocm-k8s-toolkit/examples/helm-nested-signed",
+            {"semver": "1.0.0", "interval": "10m"}).
+            withVerificationFromSecret("ocm.software", "helm-signing-secret").
+            componentReference("nested-signed-chart").
+            resourceByIdentity({"name": "helm-resource"}).
+            toOCI().registry}/${resource("helm-resource").toOCI().repository}
+          ref:
+            digest: ${resource("helm-resource").toOCI().digest}
+
+    - id: helmrelease
+      template:
+        apiVersion: helm.toolkit.fluxcd.io/v2
+        kind: HelmRelease
+        metadata:
+          name: deployment-helm-nested-signed-helm-release
+        spec:
+          releaseName: deployment-helm-nested-signed
+          interval: 1m
+          timeout: 5m
+          chartRef:
+            kind: OCIRepository
+            name: ${ocirepository.metadata.name}
+            namespace: default

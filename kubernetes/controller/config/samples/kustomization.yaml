@@ -5,4 +5,5 @@ resources:
 - delivery_v1alpha1_resource.yaml
 - delivery_v1alpha1_replication.yaml
 - delivery_v1alpha1_deployer.yaml
+- delivery_v1alpha1_deployment.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

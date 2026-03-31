@@ -13,37 +13,21 @@ import (
 )
 
 const (
-	ComponentConstructor = "component-constructor.yaml"
-	Bootstrap            = "bootstrap.yaml"
-	Rgd                  = "rgd.yaml"
-	Instance             = "instance.yaml"
-	K8sManifest          = "k8s-manifest.yaml"
-	PublicKey            = "ocm.software.pub"
-	PrivateKey           = "ocm.software"
+	DeploymentManifest = "deployment.yaml"
 )
 
-// ignoreExamples lists examples that are tested elsewhere or should be skipped.
-var ignoreExamples = map[string]struct{}{
-	"applyset-pruning":                          {}, // tested in e2e_applyset_test.go
-	"deployment-helm-simple":                    {}, // tested in e2e_deployment_test.go
-	"deployment-helm-configuration-localization": {}, // tested in e2e_deployment_test.go
-	"deployment-helm-nested":                    {}, // tested in e2e_deployment_test.go
-	"deployment-helm-nested-signed":             {}, // tested in e2e_deployment_test.go
-	"deployment-helm-signing":                   {}, // tested in e2e_deployment_test.go
-}
-
 var _ = Describe("controller", func() {
-	Context("examples", func() {
+	Context("deployment examples", func() {
 		AfterEach(func() {
 			if !CurrentSpecReport().Failed() {
 				return
 			}
 
-			utils.DumpLogs("kro", "rgd")
+			utils.DumpLogs("ocm-k8s-toolkit-system", "ocmdeployments.delivery.ocm.software")
 		})
 
 		for _, example := range examples {
-			if _, ok := ignoreExamples[example.Name()]; ok {
+			if !strings.HasPrefix(example.Name(), "deployment-") {
 				continue
 			}
 			fInfo, err := os.Stat(filepath.Join(examplesDir, example.Name()))
@@ -52,7 +36,7 @@ var _ = Describe("controller", func() {
 				continue
 			}
 
-			reqFiles := []string{ComponentConstructor, Bootstrap}
+			reqFiles := []string{ComponentConstructor, DeploymentManifest}
 
 			It("should deploy the example "+example.Name(), func(ctx SpecContext) {
 				By("validating the example directory " + example.Name())
@@ -73,7 +57,6 @@ var _ = Describe("controller", func() {
 				Expect(files).To(ContainElements(reqFiles), "required files %s not found in example directory %q", reqFiles, example.Name())
 
 				By("creating and transferring a component version for " + example.Name())
-				// If directory contains a private key, the component version must signed.
 				signingKey := ""
 				if slices.Contains(files, PrivateKey) {
 					signingKey = filepath.Join(examplesDir, example.Name(), PrivateKey)
@@ -86,31 +69,18 @@ var _ = Describe("controller", func() {
 					signingKey,
 				)).To(Succeed())
 
-				By("bootstrapping the example")
-				Expect(utils.DeployResource(ctx, filepath.Join(examplesDir, example.Name(), Bootstrap))).To(Succeed())
-				name := ""
+				By("deploying the OCMDeployment CR")
+				Expect(utils.DeployResource(ctx, filepath.Join(examplesDir, example.Name(), DeploymentManifest))).To(Succeed())
 
-				if slices.Contains(files, Rgd) {
-					name = "rgd/" + example.Name()
-					Expect(utils.WaitForResource(ctx, "create", timeout, name)).To(Succeed())
-					Expect(
-						utils.WaitForResource(ctx, "condition=Ready=true", timeout, name)).To(
-						Succeed(),
-						"The final readiness condition was not set, which means KRO believes the RGD %s was not reconciled correctly", name,
-					)
-				}
-
-				if slices.Contains(files, Instance) {
-					By("creating an instance of the example")
-					Expect(utils.DeployAndWaitForResource(
-						ctx, filepath.Join(examplesDir, example.Name(), Instance),
-						"condition=Ready=true",
-						timeout,
-					)).To(Succeed())
-				}
+				By("waiting for the OCMDeployment CR to become ready")
+				Expect(utils.WaitForResource(
+					ctx, "condition=Ready=true",
+					timeout,
+					"ocmdeployments.delivery.ocm.software/"+example.Name(),
+				)).To(Succeed())
 
 				By("validating the example")
-				name = "deployment.apps/" + example.Name() + "-podinfo"
+				name := "deployment.apps/" + example.Name() + "-podinfo"
 				Expect(utils.WaitForResource(ctx, "create", timeout, name)).To(Succeed())
 				Expect(utils.WaitForResource(ctx, "condition=Available", timeout, name)).To(Succeed())
 				Expect(utils.WaitForResource(

@@ -1,0 +1,63 @@
+# Deployment with component nesting (single-level).
+#
+# Component structure:
+#   helm-nested (root)
+#     ├── reference: "nested-rgd"  → helm-nested/rgd   (contains kro-rgd blob)
+#     └── reference: "nested-chart" → helm-nested/chart (contains helm-resource)
+#
+# New CEL functions used:
+#   componentReference("nested-chart")
+#     Resolves the named reference from the parent component's descriptor
+#     and creates a dedicated Component CR for the referenced component.
+#     Returns a component handle that supports .resource("name").
+#
+# The full chain declares the root component.
+# componentReference() navigates into nested components.
+# resource() uses auto-discovery from all known components.
+apiVersion: delivery.ocm.software/v1alpha1
+kind: OCMDeployment
+metadata:
+  name: deployment-helm-nested
+spec:
+  resources:
+    - id: ocirepository
+      template:
+        apiVersion: source.toolkit.fluxcd.io/v1
+        kind: OCIRepository
+        metadata:
+          name: deployment-helm-nested-oci-repository
+        spec:
+          interval: 1m0s
+          insecure: true
+          layerSelector:
+            mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+            operation: copy
+          # The full chain declares the root component.
+          # componentReference("nested-chart") follows the reference into the
+          # nested component and creates a Component CR for it. The resource
+          # "helm-resource" lives in the nested component.
+          url: >-
+            oci://${repoByRef("http://image-registry:5000",
+            {"type": "OCIRegistry", "interval": "10m"}).
+            componentByReference("ocm.software/ocm-k8s-toolkit/examples/helm-nested",
+            {"semver": "1.0.0", "interval": "10m"}).
+            componentReference("nested-chart").
+            resourceByIdentity({"name": "helm-resource"}).
+            toOCI().registry}/${resource("helm-resource").toOCI().repository}
+          ref:
+            digest: ${resource("helm-resource").toOCI().digest}
+
+    - id: helmrelease
+      template:
+        apiVersion: helm.toolkit.fluxcd.io/v2
+        kind: HelmRelease
+        metadata:
+          name: deployment-helm-nested-helm-release
+        spec:
+          releaseName: deployment-helm-nested
+          interval: 1m
+          timeout: 5m
+          chartRef:
+            kind: OCIRepository
+            name: ${ocirepository.metadata.name}
+            namespace: default

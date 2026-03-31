@@ -25,4 +25,7 @@ const (
 	// RepositoryFinalizer makes sure that the OCM repository is only deleted when it is no longer referenced by any
 	// other component.
 	RepositoryFinalizer = "finalizers.ocm.software/repository"
+	// OCMDeploymentFinalizer makes sure that managed resources are cleaned up before
+	// the OCMDeployment is deleted.
+	OCMDeploymentFinalizer = "finalizers.ocm.software/ocmdeployment"
 )

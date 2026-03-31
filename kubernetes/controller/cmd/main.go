@@ -38,7 +38,9 @@ import (
 	"ocm.software/open-component-model/bindings/go/rsa/signing/handler"
 	signingv1alpha1 "ocm.software/open-component-model/bindings/go/rsa/signing/v1alpha1"
 	ocmruntime "ocm.software/open-component-model/bindings/go/runtime"
+
 	"ocm.software/open-component-model/kubernetes/controller/api/v1alpha1"
+	"ocm.software/open-component-model/kubernetes/controller/internal/controller"
 	"ocm.software/open-component-model/kubernetes/controller/internal/controller/component"
 	"ocm.software/open-component-model/kubernetes/controller/internal/controller/deployer"
 	"ocm.software/open-component-model/kubernetes/controller/internal/controller/deployer/cache"
@@ -303,6 +305,15 @@ func main() {
 		MaxResourceSizeBytes: maxResourceSizeBytes,
 	}).SetupWithManager(ctx, mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Deployer")
+		os.Exit(1)
+	}
+	if err := (&controller.DeploymentReconciler{
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		Resolver:      resolver,
+		PluginManager: pm,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "OCMDeployment")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

@@ -1,0 +1,230 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: ocmdeployments.delivery.ocm.software
+spec:
+  group: delivery.ocm.software
+  names:
+    kind: OCMDeployment
+    listKind: OCMDeploymentList
+    plural: ocmdeployments
+    singular: ocmdeployment
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Indicates if the OCMDeployment is Ready
+      jsonPath: .status.conditions[?(@.type=="Ready")].message
+      name: Ready
+      priority: 1
+      type: string
+    - description: Displays the Age of the OCMDeployment
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          OCMDeployment is the Schema for the ocmdeployments API.
+          An OCMDeployment manages a set of Kubernetes resources defined as templates
+          with CEL expression interpolation. Resources can reference each other
+          by ID and use OCM-specific CEL functions to resolve component references,
+          resource identities, and OCI image locations.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: OCMDeploymentSpec defines the desired state of OCMDeployment.
+            properties:
+              resources:
+                description: |-
+                  Resources is a list of Kubernetes resources to be created and managed.
+                  Each resource has a unique ID and a template containing the resource
+                  manifest. Templates may contain ${} CEL expressions for OCM resolution
+                  and cross-resource references.
+                items:
+                  description: |-
+                    OCMDeploymentResource defines a single Kubernetes resource to be created
+                    as part of the OCMDeployment.
+                  properties:
+                    id:
+                      description: |-
+                        ID is a unique identifier for this resource within the OCMDeployment.
+                        Other resources can reference this resource's fields in their CEL
+                        expressions using this ID (e.g., ${myId.metadata.name}).
+                      pattern: ^[a-zA-Z][a-zA-Z0-9]*$
+                      type: string
+                    template:
+                      description: |-
+                        Template is the Kubernetes resource manifest to create.
+                        It must contain apiVersion and kind fields at minimum.
+                        String values within the template may contain ${} CEL expressions
+                        that the controller evaluates before creating the resource.
+
+                        Supported expression types:
+                          - Cross-resource references: ${otherId.metadata.name}, ${otherId.status.field}
+                          - OCM resolution (fluent API): ${repoByRef("oci://...").componentByReference("path").resourceByIdentity({"name": "res"}).toOCI().repository}
+                          - String interpolation: "prefix-${expr}-suffix"
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - id
+                  - template
+                  type: object
+                type: array
+              suspend:
+                description: |-
+                  Suspend tells the controller to suspend reconciliation of this
+                  OCMDeployment.
+                type: boolean
+            required:
+            - resources
+            type: object
+          status:
+            description: OCMDeploymentStatus defines the observed state of OCMDeployment.
+            properties:
+              conditions:
+                description: Conditions holds the conditions for the OCMDeployment.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the last observed generation of the OCMDeployment
+                  object.
+                format: int64
+                type: integer
+              resources:
+                description: Resources tracks the status of each managed resource.
+                items:
+                  description: OCMDeploymentResourceStatus tracks the state of a single
+                    managed resource.
+                  properties:
+                    error:
+                      description: |-
+                        Error contains the last error message if the resource failed to
+                        reconcile.
+                      type: string
+                    id:
+                      description: ID matches the resource ID from the spec.
+                      type: string
+                    objectReference:
+                      description: ObjectReference points to the created Kubernetes
+                        object.
+                      properties:
+                        apiVersion:
+                          description: API version of the referent.
+                          type: string
+                        kind:
+                          description: |-
+                            Kind of the referent.
+                            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                          type: string
+                        name:
+                          description: |-
+                            Name of the referent.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace of the referent.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                          type: string
+                        uid:
+                          description: |-
+                            UID of the referent.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                          type: string
+                      required:
+                      - apiVersion
+                      - kind
+                      - name
+                      type: object
+                    ready:
+                      description: Ready indicates whether the managed resource has
+                        reached a ready state.
+                      type: boolean
+                  required:
+                  - id
+                  type: object
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

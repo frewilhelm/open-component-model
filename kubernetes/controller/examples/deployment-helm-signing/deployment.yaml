@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: helm-signing-secret
+data:
+  # Base64 encoded value of the public key ocm.software.pub
+  ocm.software: "LS0tLS1CRUdJTiBSU0EgUFVCTElDIEtFWS0tLS0tCk1JSUJDZ0tDQVFFQTE0UUhEdHlaVFJXbThCZDdoZjVkVnp1L3VhQ3JVSmU4UFhXc2M0U0ZEWjJuRWZWWmZ2Rm8KQXV4aFF6UzFjN2dEOVlmRDBTSnpKU0ZnbmNlY29EQTI5TTBPTFltd2ptQWZoajlBNm1YNm1JbXlienVPYU9vago0RkpabkpkM3JGek5Cb0t3cW9ld0lIUkIvb1R6ZDZIWDZmQUM1M2RyYW8vaDFoTWpFODFEcld5a1hSQmd2ekJpClZ6ZGd1N0ZleUxMVzZEVzE1VmZMdmlpL1RTVk9RT3FlTHdpc3hUR2JpNjdMYy8vVFRnQlZCRUg5NjU0MnB2bjAKUTVuRzVKa3hGVWY2ajBxM3lkM0lPVW9nUHZJbzNkcDllR1Q0b1VRTTNTSTdKcC9NRG5NNHEySkpjbERNL1pZTQpwWE5ub2VXWlQ3NEZ3QzdBcTdBWmxKSG9hRHVqVGdGSTR3SURBUUFCCi0tLS0tRU5EIFJTQSBQVUJMSUMgS0VZLS0tLS0K"
+---
+# Deployment with signature verification (no nesting).
+#
+# Component structure:
+#   helm-signing (single component)
+#     ├── resource: helm-resource (Helm chart)
+#     └── resource: kro-rgd (not used in this deployment)
+#
+# New CEL functions used:
+#   .withVerification("signature-name", "PEM-encoded-public-key")
+#     Adds a signature verification to the auto-created Component CR.
+#     The Component controller will verify the component's signature
+#     against this public key before marking it Ready.
+#
+#   .withVerificationFromSecret("signature-name", "secret-name")
+#     Same, but loads the public key from a Kubernetes Secret.
+#     The Secret must have a data key matching the signature name.
+#
+# Note: The Secret must be created separately (not part of OCMDeployment).
+apiVersion: delivery.ocm.software/v1alpha1
+kind: OCMDeployment
+metadata:
+  name: deployment-helm-signing
+spec:
+  resources:
+    - id: ocirepository
+      template:
+        apiVersion: source.toolkit.fluxcd.io/v1
+        kind: OCIRepository
+        metadata:
+          name: deployment-helm-signing-oci-repository
+        spec:
+          interval: 1m0s
+          insecure: true
+          layerSelector:
+            mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+            operation: copy
+          # withVerificationFromSecret adds verify[] to the auto-created
+          # Component CR. The component version is only used if the
+          # "ocm.software" signature checks out against the key in the Secret.
+          url: >-
+            oci://${repoByRef("http://image-registry:5000",
+            {"type": "OCIRegistry", "interval": "10m"}).
+            componentByReference("ocm.software/ocm-k8s-toolkit/examples/helm-signing",
+            {"semver": "1.0.0", "interval": "10m"}).
+            withVerificationFromSecret("ocm.software", "helm-signing-secret").
+            resourceByIdentity({"name": "helm-resource"}).
+            toOCI().registry}/${resource("helm-resource").toOCI().repository}
+          ref:
+            digest: ${resource("helm-resource").toOCI().digest}
+
+    - id: helmrelease
+      template:
+        apiVersion: helm.toolkit.fluxcd.io/v2
+        kind: HelmRelease
+        metadata:
+          name: deployment-helm-signing-helm-release
+        spec:
+          releaseName: deployment-helm-signing
+          interval: 1m
+          timeout: 5m
+          chartRef:
+            kind: OCIRepository
+            name: ${ocirepository.metadata.name}
+            namespace: default

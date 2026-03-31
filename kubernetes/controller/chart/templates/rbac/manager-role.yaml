@@ -31,6 +31,7 @@ rules:
       resources:
         - components
         - deployers
+        - ocmdeployments
         - repositories
         - resources
       verbs:
@@ -46,6 +47,7 @@ rules:
       resources:
         - components/finalizers
         - deployers/finalizers
+        - ocmdeployments/finalizers
         - repositories/finalizers
       verbs:
         - update
@@ -54,9 +56,34 @@ rules:
       resources:
         - components/status
         - deployers/status
+        - ocmdeployments/status
         - repositories/status
         - resources/status
       verbs:
         - get
         - patch
         - update
+    - apiGroups:
+        - helm.toolkit.fluxcd.io
+      resources:
+        - helmreleases
+      verbs:
+        - create
+        - delete
+        - get
+        - list
+        - patch
+        - update
+        - watch
+    - apiGroups:
+        - source.toolkit.fluxcd.io
+      resources:
+        - ocirepositories
+      verbs:
+        - create
+        - delete
+        - get
+        - list
+        - patch
+        - update
+        - watch
