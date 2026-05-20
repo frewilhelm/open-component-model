@@ -1,0 +1,22 @@
+components:
+  - name: "${NAME}"
+    version: "${VERSION}"
+    provider:
+      name: ocm.software/day2
+
+    componentReferences:
+      - name: db-migrator
+        componentName: acme.org/day2/db-migrator
+        version: "${VERSION}"
+      - name: postgres
+        componentName: acme.org/day2/postgres
+        version: "${VERSION}"
+
+    resources:
+      - name: product-rgd
+        type: blob
+        relation: local
+        input:
+          type: file
+          path: ./deploy/rgd.yaml
+          mediaType: application/vnd.cncf.kro.resourcegraphdefinition.v1+yaml

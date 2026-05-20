@@ -1,0 +1,13 @@
+components:
+  - name: "${NAME}"
+    version: "${VERSION}"
+    provider:
+      name: ocm.software/day2
+
+    resources:
+      - name: image
+        type: ociImage
+        version: "${POSTGRES_VERSION}"
+        access:
+          type: ociArtifact
+          imageReference: docker.io/library/postgres:${POSTGRES_VERSION}-alpine

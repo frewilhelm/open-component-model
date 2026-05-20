@@ -1,0 +1,15 @@
+apiVersion: kro.run/v1alpha1
+kind: Day2MigrationProduct
+metadata:
+  name: day2-migration-product
+  namespace: day2-migration
+spec:
+  version: "1.1.0"
+  repository:
+    baseUrl: http://registry:5000
+    type: OCIRegistry
+  postgres:
+    database: "day2"
+    username: "day2"
+    password: "changeme"
+    storage: "1Gi"

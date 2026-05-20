@@ -1,0 +1,263 @@
+# ResourceGraphDefinition for day-2 migration scenario.
+#
+# Deploys PostgreSQL as a StatefulSet and runs schema migrations via a Job.
+# No FluxCD required - all resources created directly by kro.
+#
+# The product's own Component/Resource/Deployer must be bootstrapped
+# externally (see deploy/bootstrap.yaml) since this RGD is delivered
+# through that pipeline.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: day2-migration-product
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: Day2MigrationProduct
+    spec:
+      version: string | default="1.0.0"
+      prefix: string | default="day2-migration"
+      repository: object
+      postgres:
+        database: string | default="day2"
+        username: string | default="day2"
+        password: string | default="changeme"
+        storage: string | default="1Gi"
+
+  resources:
+    # ==========================================================
+    # Bootstrap (Self Managed)
+    # Once adopted, the product manages itself via kro idempotency.
+    # ==========================================================
+    - id: productNamespace
+      template:
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: day2-migration
+
+    - id: repository
+      readyWhen:
+        - ${repository.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
+      template:
+        apiVersion: delivery.ocm.software/v1alpha1
+        kind: Repository
+        metadata:
+          name: day2-migration-repo
+          namespace: ${productNamespace.metadata.name}
+        spec:
+          repositorySpec: ${schema.spec.repository}
+          interval: 10m
+
+    - id: productComponent
+      readyWhen:
+        - ${productComponent.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
+      template:
+        apiVersion: delivery.ocm.software/v1alpha1
+        kind: Component
+        metadata:
+          name: day2-migration-component
+          namespace: ${productNamespace.metadata.name}
+        spec:
+          component: acme.org/day2/product
+          repositoryRef:
+            name: ${repository.metadata.name}
+          semver: ${schema.spec.version}
+          interval: 1m
+
+    - id: rgdResource
+      readyWhen:
+        - ${rgdResource.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
+      template:
+        apiVersion: delivery.ocm.software/v1alpha1
+        kind: Resource
+        metadata:
+          name: day2-migration-resource-rgd
+          namespace: ${productNamespace.metadata.name}
+        spec:
+          componentRef:
+            name: ${productComponent.metadata.name}
+          resource:
+            byReference:
+              resource:
+                name: product-rgd
+
+    - id: rgdDeployer
+      readyWhen:
+        - ${rgdDeployer.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
+      template:
+        apiVersion: delivery.ocm.software/v1alpha1
+        kind: Deployer
+        metadata:
+          name: day2-migration-deployer
+        spec:
+          resourceRef:
+            name: ${rgdResource.metadata.name}
+            namespace: ${productNamespace.metadata.name}
+
+    # ==========================================================
+    # PostgreSQL Database
+    # ==========================================================
+
+    # Resolve postgres container image from OCM component.
+    - id: postgresImageResource
+      readyWhen:
+        - ${postgresImageResource.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
+      template:
+        apiVersion: delivery.ocm.software/v1alpha1
+        kind: Resource
+        metadata:
+          name: day2-migration-resource-postgres
+          namespace: ${productNamespace.metadata.name}
+        spec:
+          componentRef:
+            name: ${productComponent.metadata.name}
+          resource:
+            byReference:
+              referencePath:
+                - name: postgres
+              resource:
+                name: image
+          additionalStatusFields:
+            oci: resource.access.toOCI()
+
+    - id: postgresSecret
+      template:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: ${schema.spec.prefix}-postgres-credentials
+          namespace: ${productNamespace.metadata.name}
+        type: Opaque
+        stringData:
+          POSTGRES_DB: ${schema.spec.postgres.database}
+          POSTGRES_USER: ${schema.spec.postgres.username}
+          POSTGRES_PASSWORD: ${schema.spec.postgres.password}
+
+    - id: postgresService
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: ${schema.spec.prefix}-postgres
+          namespace: ${productNamespace.metadata.name}
+        spec:
+          selector:
+            app: ${schema.spec.prefix}-postgres
+          ports:
+            - port: 5432
+              targetPort: 5432
+          clusterIP: None
+
+    - id: postgresStatefulSet
+      readyWhen:
+        - ${postgresStatefulSet.status.readyReplicas >= 1}
+      template:
+        apiVersion: apps/v1
+        kind: StatefulSet
+        metadata:
+          name: ${schema.spec.prefix}-postgres
+          namespace: ${productNamespace.metadata.name}
+        spec:
+          serviceName: ${postgresService.metadata.name}
+          replicas: 1
+          selector:
+            matchLabels:
+              app: ${schema.spec.prefix}-postgres
+          template:
+            metadata:
+              labels:
+                app: ${schema.spec.prefix}-postgres
+            spec:
+              containers:
+                - name: postgres
+                  image: "${postgresImageResource.status.additional.oci.registry}/${postgresImageResource.status.additional.oci.repository}@${postgresImageResource.status.additional.oci.digest}"
+                  ports:
+                    - containerPort: 5432
+                  envFrom:
+                    - secretRef:
+                        name: ${postgresSecret.metadata.name}
+                  readinessProbe:
+                    exec:
+                      command:
+                        - pg_isready
+                        - -U
+                        - ${schema.spec.postgres.username}
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+                  volumeMounts:
+                    - name: data
+                      mountPath: /var/lib/postgresql/data
+          volumeClaimTemplates:
+            - metadata:
+                name: data
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: ${schema.spec.postgres.storage}
+
+    # ==========================================================
+    # Migration Pipeline
+    # ==========================================================
+
+    # Resolve the db-migrator container image from the OCM component.
+    - id: migratorImageResource
+      readyWhen:
+        - ${migratorImageResource.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
+      template:
+        apiVersion: delivery.ocm.software/v1alpha1
+        kind: Resource
+        metadata:
+          name: day2-migration-resource-migrator
+          namespace: ${productNamespace.metadata.name}
+        spec:
+          componentRef:
+            name: ${productComponent.metadata.name}
+          resource:
+            byReference:
+              referencePath:
+                - name: db-migrator
+              resource:
+                name: image
+          additionalStatusFields:
+            oci: resource.access.toOCI()
+
+    # Migration Job - name includes version so each upgrade creates a new Job.
+    # kro's ApplySet prunes the previous version's Job automatically.
+    #
+    # KNOWN LIMITATION: The instance CR will enter ERROR state after Job
+    # creation because kro's SSA reconcile loop conflicts with Kubernetes
+    # Job immutability (controller-uid labels auto-added to spec.template).
+    # The Job itself runs to completion regardless. Verify externally.
+    - id: migrationJob
+      template:
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: "${schema.spec.prefix}-${schema.spec.version.replace('.', '-')}"
+          namespace: ${productNamespace.metadata.name}
+        spec:
+          backoffLimit: 3
+          template:
+            spec:
+              restartPolicy: Never
+              containers:
+                - name: migrator
+                  image: "${migratorImageResource.status.additional.oci.registry}/${migratorImageResource.status.additional.oci.repository}@${migratorImageResource.status.additional.oci.digest}"
+                  command: ["/bin/sh", "/scripts/migrate.sh"]
+                  env:
+                    - name: DB_HOST
+                      value: ${postgresService.metadata.name}
+                    - name: DB_PORT
+                      value: "5432"
+                    - name: DB_NAME
+                      value: ${schema.spec.postgres.database}
+                    - name: DB_USER
+                      value: ${schema.spec.postgres.username}
+                    - name: DB_PASSWORD
+                      valueFrom:
+                        secretKeyRef:
+                          name: ${postgresSecret.metadata.name}
+                          key: POSTGRES_PASSWORD

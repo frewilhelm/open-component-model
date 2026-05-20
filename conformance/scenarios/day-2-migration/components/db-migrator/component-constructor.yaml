@@ -1,0 +1,15 @@
+components:
+  - name: "${NAME}"
+    version: "${VERSION}"
+    provider:
+      name: ocm.software/day2
+
+    resources:
+      - name: image
+        type: ociImage
+        relation: local
+        version: "${VERSION}"
+        input:
+          type: file
+          mediaType: application/vnd.ocm.software.oci.layout.v1+tar+gzip
+          path: "${OCI_LAYOUT}"

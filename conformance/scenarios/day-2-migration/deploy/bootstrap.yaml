@@ -1,0 +1,54 @@
+# Bootstrap: Product component pipeline.
+#
+# This is the minimum needed to deliver the product RGD into the cluster.
+# The product RGD itself then creates the migration pipeline and starts
+# managing itself - see components/product/deploy/rgd.yaml.
+#
+# Prerequisites (applied before this file):
+#   - Namespace: day2-migration
+---
+apiVersion: delivery.ocm.software/v1alpha1
+kind: Repository
+metadata:
+  name: day2-migration-repo
+  namespace: day2-migration
+spec:
+  repositorySpec:
+    baseUrl: http://registry:5000
+    type: OCIRegistry
+  interval: 10m
+---
+apiVersion: delivery.ocm.software/v1alpha1
+kind: Component
+metadata:
+  name: day2-migration-component
+  namespace: day2-migration
+spec:
+  component: acme.org/day2/product
+  repositoryRef:
+    name: day2-migration-repo
+  semver: ">=1.0.0"
+  interval: 1m
+---
+apiVersion: delivery.ocm.software/v1alpha1
+kind: Resource
+metadata:
+  name: day2-migration-resource-rgd
+  namespace: day2-migration
+spec:
+  componentRef:
+    name: day2-migration-component
+  resource:
+    byReference:
+      resource:
+        name: product-rgd
+---
+apiVersion: delivery.ocm.software/v1alpha1
+kind: Deployer
+metadata:
+  name: day2-migration-deployer
+  namespace: day2-migration
+spec:
+  resourceRef:
+    name: day2-migration-resource-rgd
+    namespace: day2-migration
