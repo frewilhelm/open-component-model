@@ -1031,7 +1031,6 @@ func Test_Integration_TransferOCIImageResource_FromConfig(t *testing.T) {
 	r.NoError(err)
 	r.NotNil(tgd)
 
-	// CopyModeAllResources from the config must surface as a GetOCIArtifact transformation.
 	hasGetOCIArtifact := false
 	for _, tr := range tgd.Transformations {
 		if tr.Type.Name == "GetOCIArtifact" {
