@@ -17,7 +17,9 @@ import (
 	"ocm.software/open-component-model/bindings/go/oci/compref"
 	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
 	"ocm.software/open-component-model/bindings/go/plugin/manager"
+	"ocm.software/open-component-model/bindings/go/runtime"
 	"ocm.software/open-component-model/bindings/go/transfer"
+	transferv1alpha1 "ocm.software/open-component-model/bindings/go/transfer/v1alpha1"
 	graphPkg "ocm.software/open-component-model/bindings/go/transform/graph"
 	graphRuntime "ocm.software/open-component-model/bindings/go/transform/graph/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
@@ -30,12 +32,13 @@ import (
 )
 
 const (
-	FlagDryRun        = "dry-run"
-	FlagOutput        = "output"
-	FlagRecursive     = "recursive"
-	FlagCopyResources = "copy-resources"
-	FlagUploadAs      = "upload-as"
-	FlagTransferSpec  = "transfer-spec"
+	FlagDryRun         = "dry-run"
+	FlagOutput         = "output"
+	FlagRecursive      = "recursive"
+	FlagCopyResources  = "copy-resources"
+	FlagUploadAs       = "upload-as"
+	FlagTransferSpec   = "transfer-spec"
+	FlagTransferConfig = "transfer-config"
 
 	// Each node emits 2 events (Running + Completed/Failed) and since the tracker consumes
 	// them faster than the transfer produces, 16 is enough to avoid blocking with room to grow.
@@ -61,6 +64,10 @@ We support OCI and CTF as well as Helm repositories as transfer sources.
 OCI and CTF repositories are supported as transfer targets, while Helm repositories are not supported.
 The graph is built accordingly based on the provided references.
 By default, only the component version itself is transferred, but with --copy-resources, all resources are also copied and transformed if necessary.
+
+A TransferConfiguration/v1alpha1 file can be supplied via --transfer-config to set defaults for
+--recursive, --copy-resources, and --upload-as. Explicit command-line flags always override the
+values from the file.
 
 The graph is validated, and then executed unless --dry-run is set.
 
@@ -95,6 +102,13 @@ transfer component-version ctf::./my-archive//ocm.software/mycomponent:1.0.0 ghc
 # Recursively transfer a component version and all its references
 transfer component-version ghcr.io/source-org/ocm//ocm.software/mycomponent:1.0.0 ghcr.io/target-org/ocm -r --copy-resources
 
+# Use a TransferConfiguration/v1alpha1 file to set defaults
+#   type: TransferConfiguration/v1alpha1
+#   recursive: true
+#   copyMode: allResources
+#   uploadType: ociArtifact
+transfer component-version --transfer-config ./transfer-config.yaml ghcr.io/source-org/ocm//ocm.software/mycomponent:1.0.0 ghcr.io/target-org/ocm
+
 # Two-step transfer: generate a spec with all desired flags, then review and execute
 transfer component-version --dry-run -o yaml --copy-resources -r ghcr.io/source-org/ocm//ocm.software/mycomponent:1.0.0 ghcr.io/target-org/ocm > spec.yaml
 # (review/edit spec.yaml as needed, e.g. change the target registry)
@@ -109,13 +123,18 @@ transfer component-version --transfer-spec spec.yaml
 	cmd.Flags().Bool(FlagDryRun, false, "build and validate the graph but do not execute")
 	cmd.Flags().BoolP(FlagRecursive, "r", false, "recursively discover and transfer component versions")
 	cmd.Flags().Bool(FlagCopyResources, false, "copy all resources in the component version")
-	enum.VarP(cmd.Flags(), FlagUploadAs, "u", []string{UploadAsDefault.String(), UploadAsLocalBlob.String(), UploadAsOciArtifact.String()}, "Define whether copied resources should be uploaded as OCI artifacts (instead of local blob resources). This option is only relevant if --copy-resources is set.")
+	uploadAsValues := make([]string, len(transferv1alpha1.AllUploadTypes))
+	for i, t := range transferv1alpha1.AllUploadTypes {
+		uploadAsValues[i] = string(t)
+	}
+	enum.VarP(cmd.Flags(), FlagUploadAs, "u", uploadAsValues,
+		"Define whether copied resources should be uploaded as OCI artifacts (instead of local blob resources). This option is only relevant if --copy-resources is set.")
 	cmd.Flags().String(FlagTransferSpec, "", "path to a transfer specification file (use \"-\" for stdin)")
+	cmd.Flags().String(FlagTransferConfig, "", "path to a TransferConfiguration/v1alpha1 file. Explicit flags (--recursive, --copy-resources, --upload-as) override values from the file.")
 
 	return cmd
 }
 
-// transferArgs validates positional arguments based on whether --transfer-spec is set.
 func transferArgs(cmd *cobra.Command, args []string) error {
 	specPath, err := cmd.Flags().GetString(FlagTransferSpec)
 	if err != nil {
@@ -126,7 +145,7 @@ func transferArgs(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			return fmt.Errorf("positional arguments are not allowed when --%s is set", FlagTransferSpec)
 		}
-		ignoredFlags := []string{FlagRecursive, FlagCopyResources, FlagUploadAs}
+		ignoredFlags := []string{FlagRecursive, FlagCopyResources, FlagUploadAs, FlagTransferConfig}
 		for _, name := range ignoredFlags {
 			if cmd.Flags().Changed(name) {
 				slog.Warn(fmt.Sprintf("--%s has no effect when --%s is set", name, FlagTransferSpec))
@@ -250,7 +269,6 @@ func TransferComponentVersion(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// loadTransferSpec reads a TransformationGraphDefinition from a file path or stdin (when path is "-").
 func loadTransferSpec(path string, stdin io.Reader) (*transformv1alpha1.TransformationGraphDefinition, error) {
 	var data []byte
 	var err error
@@ -308,50 +326,92 @@ func buildGraphDefinitionFromArgs(
 		return nil, fmt.Errorf("invalid target repository spec: %w", err)
 	}
 
-	recursive, err := cmd.Flags().GetBool(FlagRecursive)
+	transferConfigPath, err := cmd.Flags().GetString(FlagTransferConfig)
 	if err != nil {
-		return nil, fmt.Errorf("getting recursive flag failed: %w", err)
+		return nil, fmt.Errorf("getting transfer-config flag failed: %w", err)
 	}
-
-	copyResources, err := cmd.Flags().GetBool(FlagCopyResources)
+	transferCfg, err := loadTransferConfig(transferConfigPath)
 	if err != nil {
-		return nil, fmt.Errorf("getting copy-resources flag failed: %w", err)
+		return nil, err
 	}
 
-	copyMode := transfer.CopyModeLocalBlobResources
-	if copyResources {
-		copyMode = transfer.CopyModeAllResources
+	if cmd.Flags().Changed(FlagRecursive) {
+		recursive, err := cmd.Flags().GetBool(FlagRecursive)
+		if err != nil {
+			return nil, fmt.Errorf("getting recursive flag failed: %w", err)
+		}
+		transferCfg.Recursive = &recursive
+	}
+	if cmd.Flags().Changed(FlagCopyResources) {
+		copyResources, err := cmd.Flags().GetBool(FlagCopyResources)
+		if err != nil {
+			return nil, fmt.Errorf("getting copy-resources flag failed: %w", err)
+		}
+		if copyResources {
+			transferCfg.CopyMode = transferv1alpha1.CopyModeAllResources
+		} else {
+			transferCfg.CopyMode = transferv1alpha1.CopyModeLocalBlobResources
+		}
+	}
+	if cmd.Flags().Changed(FlagUploadAs) {
+		uploadAs, err := enum.Get(cmd.Flags(), FlagUploadAs)
+		if err != nil {
+			return nil, fmt.Errorf("getting upload-as flag failed: %w", err)
+		}
+		transferCfg.UploadType = transferv1alpha1.UploadType(uploadAs)
 	}
 
-	uploadType, err := enum.Get(cmd.Flags(), FlagUploadAs)
-	if err != nil {
-		return nil, fmt.Errorf("getting upload-as flag failed: %w", err)
+	if err := transferCfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid transfer configuration: %w", err)
 	}
 
-	upTyp := transfer.UploadAsDefault
-	switch uploadType {
-	case UploadAsLocalBlob.String():
-		upTyp = transfer.UploadAsLocalBlob
-	case UploadAsOciArtifact.String():
-		upTyp = transfer.UploadAsOciArtifact
-	}
-
-	tgd, err := transfer.BuildGraphDefinition(
-		ctx,
+	opts := append(transfer.FromConfig(transferCfg),
 		transfer.WithTransfer(
 			transfer.Component(fromSpec.Component, fromSpec.Version),
 			transfer.ToRepositorySpec(toSpec),
 			transfer.FromResolver(repoProvider),
 		),
-		transfer.WithRecursive(recursive),
-		transfer.WithCopyMode(copyMode),
-		transfer.WithUploadType(upTyp),
 	)
+	tgd, err := transfer.BuildGraphDefinition(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("building graph definition failed: %w", err)
 	}
 
 	return tgd, nil
+}
+
+func loadTransferConfig(path string) (_ *transferv1alpha1.Config, err error) {
+	if path == "" {
+		return &transferv1alpha1.Config{}, nil
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading transfer config %q failed: %w", path, err)
+	}
+	// errors.Join keeps a Close failure in the returned error without masking the primary one.
+	defer func() {
+		err = errors.Join(err, f.Close())
+	}()
+
+	raw := &runtime.Raw{}
+	if err := runtime.NewScheme(runtime.WithAllowUnknown()).Decode(f, raw); err != nil {
+		return nil, fmt.Errorf("decoding transfer config %q failed: %w", path, err)
+	}
+
+	obj, err := transferv1alpha1.Scheme.NewObject(raw.GetType())
+	if err != nil {
+		return nil, fmt.Errorf("unsupported type in transfer config %q: %w", path, err)
+	}
+	if err := transferv1alpha1.Scheme.Convert(raw, obj); err != nil {
+		return nil, fmt.Errorf("converting transfer config %q to %s failed: %w", path, transferv1alpha1.ConfigType, err)
+	}
+
+	cfg, ok := obj.(*transferv1alpha1.Config)
+	if !ok {
+		return nil, fmt.Errorf("transfer config %q decoded to unexpected type %T", path, obj)
+	}
+	return cfg, nil
 }
 
 func renderTGD(tgd *transformv1alpha1.TransformationGraphDefinition, format string) (io.ReadCloser, error) {
