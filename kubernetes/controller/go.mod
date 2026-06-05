@@ -33,16 +33,16 @@ require (
 	ocm.software/open-component-model/bindings/go/configuration v0.0.14
 	ocm.software/open-component-model/bindings/go/credentials v0.0.12
 	ocm.software/open-component-model/bindings/go/ctf v0.4.0
-	ocm.software/open-component-model/bindings/go/descriptor/normalisation v0.0.0-20260505072254-1c17fcd5c971
-	ocm.software/open-component-model/bindings/go/descriptor/runtime v0.0.0-20260521121644-2be2fc986501
+	ocm.software/open-component-model/bindings/go/descriptor/normalisation v0.0.0-20260605124200-92eff5103d78
+	ocm.software/open-component-model/bindings/go/descriptor/runtime v0.0.0-20260605124200-92eff5103d78
 	ocm.software/open-component-model/bindings/go/descriptor/v2 v2.0.3-alpha3
-	ocm.software/open-component-model/bindings/go/helm v0.0.0-20260522105049-e4d3ffbaf1f3
+	ocm.software/open-component-model/bindings/go/helm v0.0.0-20260605124200-92eff5103d78
 	ocm.software/open-component-model/bindings/go/oci v0.0.45
 	ocm.software/open-component-model/bindings/go/plugin v0.0.16
 	ocm.software/open-component-model/bindings/go/repository v0.0.9
-	ocm.software/open-component-model/bindings/go/rsa v0.0.0-20260522110833-67a18b816b78
+	ocm.software/open-component-model/bindings/go/rsa v0.0.0-20260605124200-92eff5103d78
 	ocm.software/open-component-model/bindings/go/runtime v0.0.8
-	ocm.software/open-component-model/bindings/go/signing v0.0.0-20260521152541-2f5bcd0f1f44
+	ocm.software/open-component-model/bindings/go/signing v0.0.0-20260605124200-92eff5103d78
 	sigs.k8s.io/release-utils v0.12.4
 )
 
