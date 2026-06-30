@@ -17,30 +17,30 @@ require (
 	golang.org/x/term v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 	ocm.software/open-component-model/bindings/go/blob v0.0.13
-	ocm.software/open-component-model/bindings/go/cel v0.0.0-20260625071532-ea5a17b8a42c
+	ocm.software/open-component-model/bindings/go/cel v0.0.0-20260630065557-4203eeea0c8d
 	ocm.software/open-component-model/bindings/go/configuration v0.0.15
 	ocm.software/open-component-model/bindings/go/constructor v0.0.11
 	ocm.software/open-component-model/bindings/go/credentials v0.0.14
 	ocm.software/open-component-model/bindings/go/ctf v0.4.1
 	ocm.software/open-component-model/bindings/go/dag v0.0.6
-	ocm.software/open-component-model/bindings/go/descriptor/normalisation v0.0.0-20260625071532-ea5a17b8a42c
-	ocm.software/open-component-model/bindings/go/descriptor/runtime v0.0.0-20260625065312-d374c10f9e61
+	ocm.software/open-component-model/bindings/go/descriptor/normalisation v0.0.0-20260630065557-4203eeea0c8d
+	ocm.software/open-component-model/bindings/go/descriptor/runtime v0.0.0-20260630065557-4203eeea0c8d
 	ocm.software/open-component-model/bindings/go/descriptor/v2 v2.0.3-alpha3
-	ocm.software/open-component-model/bindings/go/gpg v0.0.0-20260625071756-d21b8e0a6de0
-	ocm.software/open-component-model/bindings/go/helm v0.0.0-20260625071756-d21b8e0a6de0
-	ocm.software/open-component-model/bindings/go/http v0.0.0-20260625071756-d21b8e0a6de0
+	ocm.software/open-component-model/bindings/go/gpg v0.0.0-20260630065557-4203eeea0c8d
+	ocm.software/open-component-model/bindings/go/helm v0.0.0-20260630065557-4203eeea0c8d
+	ocm.software/open-component-model/bindings/go/http v0.0.0-20260630065557-4203eeea0c8d
 	ocm.software/open-component-model/bindings/go/input/dir v0.0.4
 	ocm.software/open-component-model/bindings/go/input/file v0.0.5
-	ocm.software/open-component-model/bindings/go/input/utf8 v0.0.0-20260625065312-d374c10f9e61
+	ocm.software/open-component-model/bindings/go/input/utf8 v0.0.0-20260630065557-4203eeea0c8d
 	ocm.software/open-component-model/bindings/go/oci v0.0.47
 	ocm.software/open-component-model/bindings/go/plugin v0.0.17
 	ocm.software/open-component-model/bindings/go/repository v0.0.10
-	ocm.software/open-component-model/bindings/go/rsa v0.0.0-20260625065312-d374c10f9e61
+	ocm.software/open-component-model/bindings/go/rsa v0.0.0-20260630065557-4203eeea0c8d
 	ocm.software/open-component-model/bindings/go/runtime v0.0.8
-	ocm.software/open-component-model/bindings/go/signing v0.0.0-20260625065312-d374c10f9e61
-	ocm.software/open-component-model/bindings/go/sigstore v0.0.0-20260625071756-d21b8e0a6de0
-	ocm.software/open-component-model/bindings/go/transfer v0.0.0-20260625071756-d21b8e0a6de0
-	ocm.software/open-component-model/bindings/go/transform v0.0.0-20260625071532-ea5a17b8a42c
+	ocm.software/open-component-model/bindings/go/signing v0.0.0-20260630065557-4203eeea0c8d
+	ocm.software/open-component-model/bindings/go/sigstore v0.0.0-20260630065557-4203eeea0c8d
+	ocm.software/open-component-model/bindings/go/transfer v0.0.0-20260630065557-4203eeea0c8d
+	ocm.software/open-component-model/bindings/go/transform v0.0.0-20260630065557-4203eeea0c8d
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -67,7 +67,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-openapi/jsonpointer v0.23.1 // indirect
-	github.com/go-openapi/jsonreference v0.21.5 // indirect
+	github.com/go-openapi/jsonreference v0.21.6 // indirect
 	github.com/go-openapi/swag v0.26.0 // indirect
 	github.com/go-openapi/swag/cmdutils v0.26.0 // indirect
 	github.com/go-openapi/swag/conv v0.26.0 // indirect
@@ -104,7 +104,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/tetratelabs/wabin v0.0.0-20230304001439-f6f874872834 // indirect
-	github.com/tetratelabs/wazero v1.11.0 // indirect
+	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/veqryn/slog-context v0.9.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
