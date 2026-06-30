@@ -10,8 +10,8 @@ require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cel-go v0.28.1
-	github.com/onsi/ginkgo/v2 v2.28.3
-	github.com/onsi/gomega v1.40.0
+	github.com/onsi/ginkgo/v2 v2.29.0
+	github.com/onsi/gomega v1.41.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sync v0.21.0
@@ -37,7 +37,7 @@ require (
 	ocm.software/open-component-model/bindings/go/descriptor/runtime v0.0.0-20260625065312-d374c10f9e61
 	ocm.software/open-component-model/bindings/go/descriptor/v2 v2.0.3-alpha3
 	ocm.software/open-component-model/bindings/go/helm v0.0.0-20260625071756-d21b8e0a6de0
-	ocm.software/open-component-model/bindings/go/oci v0.0.46
+	ocm.software/open-component-model/bindings/go/oci v0.0.47
 	ocm.software/open-component-model/bindings/go/plugin v0.0.17
 	ocm.software/open-component-model/bindings/go/repository v0.0.10
 	ocm.software/open-component-model/bindings/go/rsa v0.0.0-20260625065312-d374c10f9e61
@@ -113,7 +113,7 @@ require (
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.67.5 // indirect
+	github.com/prometheus/common v0.68.0 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
@@ -152,7 +152,7 @@ require (
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260603220949-865597e52e25 // indirect
 	ocm.software/open-component-model/bindings/go/cel v0.0.0-20260625071532-ea5a17b8a42c // indirect
-	ocm.software/open-component-model/bindings/go/constructor v0.0.10 // indirect
+	ocm.software/open-component-model/bindings/go/constructor v0.0.11 // indirect
 	ocm.software/open-component-model/bindings/go/dag v0.0.6 // indirect
 	ocm.software/open-component-model/bindings/go/http v0.0.0-20260625071756-d21b8e0a6de0 // indirect
 	oras.land/oras-go/v2 v2.6.1 // indirect
