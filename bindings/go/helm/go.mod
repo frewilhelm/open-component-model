@@ -103,8 +103,8 @@ require (
 	k8s.io/cli-runtime v0.36.1 // indirect
 	k8s.io/client-go v0.36.1 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
-	k8s.io/kube-openapi v0.0.0-20260520065146-aa012df4f4af // indirect
-	k8s.io/utils v0.0.0-20260507154919-ff6756f316d2 // indirect
+	k8s.io/kube-openapi v0.0.0-20260624041617-8f3fa4921821 // indirect
+	k8s.io/utils v0.0.0-20260626114624-be93311217bd // indirect
 	ocm.software/open-component-model/bindings/go/ctf v0.4.1 // indirect
 	ocm.software/open-component-model/bindings/go/dag v0.0.6 // indirect
 	ocm.software/open-component-model/bindings/go/descriptor/normalisation v0.0.0-20260630065557-4203eeea0c8d // indirect
