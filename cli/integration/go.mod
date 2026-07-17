@@ -26,7 +26,7 @@ require (
 	ocm.software/open-component-model/bindings/go/runtime v0.0.8
 	ocm.software/open-component-model/bindings/go/signing v0.0.0-20260526150939-f40aef55435e
 	ocm.software/open-component-model/cli v0.8.0
-	oras.land/oras-go/v2 v2.6.0
+	oras.land/oras-go/v2 v2.6.1
 )
 
 require (
