@@ -1,6 +1,6 @@
 module ocm.software/open-component-model/bindings/go/http/integration
 
-go 1.26.3
+go 1.26.4
 
 require (
 	github.com/Shopify/toxiproxy/v2 v2.12.0
@@ -8,7 +8,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/registry v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/toxiproxy v0.42.0
-	ocm.software/open-component-model/bindings/go/configuration v0.0.14
+	ocm.software/open-component-model/bindings/go/configuration v0.0.16
 	ocm.software/open-component-model/bindings/go/http v0.0.0-00010101000000-000000000000
 )
 
