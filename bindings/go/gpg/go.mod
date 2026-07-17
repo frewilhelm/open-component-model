@@ -1,12 +1,12 @@
 module ocm.software/open-component-model/bindings/go/gpg
 
-go 1.26.3
+go 1.26.4
 
 require (
 	github.com/ProtonMail/go-crypto v1.4.1
 	github.com/stretchr/testify v1.11.1
-	ocm.software/open-component-model/bindings/go/credentials v0.0.12
-	ocm.software/open-component-model/bindings/go/descriptor/runtime v0.0.0-20260505072254-1c17fcd5c971
+	ocm.software/open-component-model/bindings/go/credentials v0.0.14
+	ocm.software/open-component-model/bindings/go/descriptor/runtime v0.0.0-20260717062635-65d9c9c7d7b9
 	ocm.software/open-component-model/bindings/go/runtime v0.0.8
 )
 
@@ -20,7 +20,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/sys v0.44.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	ocm.software/open-component-model/bindings/go/descriptor/v2 v2.0.3-alpha3 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
