@@ -112,39 +112,10 @@ spec:
                       == "Repository" || self.kind == "Component" || self.kind ==
                       "Resource" || self.kind == "Replication"))
                 type: array
-              resource:
-                description: Resource identifies the ocm resource to be fetched.
-                properties:
-                  byReference:
-                    description: |-
-                      ResourceReference defines a reference to a resource akin to the OCM Specification.
-                      For more details see dedicated guide in the Specification:
-                      https://github.com/open-component-model/ocm-spec/blob/main/doc/05-guidelines/03-references.md#references
-                    properties:
-                      referencePath:
-                        items:
-                          additionalProperties:
-                            type: string
-                          description: |-
-                            Identity is a map that represents a set of attributes that uniquely identity
-                            arbitrary resources. It is used in various places in Open Component Model to uniquely
-                            identity objects such as resources or components.
-                          type: object
-                        type: array
-                      resource:
-                        additionalProperties:
-                          type: string
-                        description: |-
-                          Identity is a map that represents a set of attributes that uniquely identity
-                          arbitrary resources. It is used in various places in Open Component Model to uniquely
-                          identity objects such as resources or components.
-                        type: object
-                    required:
-                    - resource
-                    type: object
-                required:
-                - byReference
-                type: object
+              referenceFilter:
+                type: string
+              resourceFilter:
+                type: string
               suspend:
                 description: |-
                   Suspend tells the controller to suspend the reconciliation of this
@@ -152,7 +123,6 @@ spec:
                 type: boolean
             required:
             - componentRef
-            - resource
             type: object
           status:
             description: DiscoveryStatus defines the observed state of Resource.
@@ -217,6 +187,56 @@ spec:
               discovery:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
+              effectiveOCMConfig:
+                description: |-
+                  EffectiveOCMConfig specifies the entirety of config maps and secrets
+                  whose configuration data was applied to the Resource reconciliation,
+                  in the order the configuration data was applied.
+                items:
+                  description: |-
+                    OCMConfiguration defines a configuration applied to the reconciliation of an
+                    ocm k8s object as well as the policy for its propagation of this
+                    configuration.
+                  properties:
+                    apiVersion:
+                      description: API version of the referent, if not specified the
+                        Kubernetes preferred version will be used.
+                      type: string
+                    kind:
+                      description: Kind of the referent.
+                      type: string
+                    name:
+                      description: Name of the referent.
+                      type: string
+                    namespace:
+                      description: Namespace of the referent, when not specified it
+                        acts as LocalObjectReference.
+                      type: string
+                    policy:
+                      default: Propagate
+                      description: |-
+                        Policy affects the propagation behavior of the configuration. If set to
+                        ConfigurationPolicyPropagate other ocm api objects can reference this
+                        object to reuse this configuration.
+                      enum:
+                      - Propagate
+                      - DoNotPropagate
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  - policy
+                  type: object
+                  x-kubernetes-validations:
+                  - message: apiVersion must be one of "v1" with kind "Secret" or
+                      "ConfigMap" or "delivery.ocm.software/v1alpha1" with the kind
+                      of an OCM kubernetes object
+                    rule: ((!has(self.apiVersion) || self.apiVersion == "" || self.apiVersion
+                      == "v1") && (self.kind == "Secret" || self.kind == "ConfigMap"))
+                      || (self.apiVersion == "delivery.ocm.software/v1alpha1" && (self.kind
+                      == "Repository" || self.kind == "Component" || self.kind ==
+                      "Resource" || self.kind == "Replication"))
+                type: array
               observedGeneration:
                 description: |-
                   ObservedGeneration is the last observed generation of the Resource

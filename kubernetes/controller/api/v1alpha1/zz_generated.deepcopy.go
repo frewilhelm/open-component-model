@@ -341,7 +341,6 @@ func (in *DiscoveryList) DeepCopyObject() pkgruntime.Object {
 func (in *DiscoverySpec) DeepCopyInto(out *DiscoverySpec) {
 	*out = *in
 	out.ComponentRef = in.ComponentRef
-	in.Resource.DeepCopyInto(&out.Resource)
 	if in.OCMConfig != nil {
 		in, out := &in.OCMConfig, &out.OCMConfig
 		*out = make([]OCMConfiguration, len(*in))
@@ -368,6 +367,11 @@ func (in *DiscoveryStatus) DeepCopyInto(out *DiscoveryStatus) {
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.EffectiveOCMConfig != nil {
+		in, out := &in.EffectiveOCMConfig, &out.EffectiveOCMConfig
+		*out = make([]OCMConfiguration, len(*in))
+		copy(*out, *in)
 	}
 	if in.Discovery != nil {
 		in, out := &in.Discovery, &out.Discovery

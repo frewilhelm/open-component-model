@@ -22,8 +22,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"ocm.software/open-component-model/bindings/go/dag"
 	syncdag "ocm.software/open-component-model/bindings/go/dag/sync"
-	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
+	descruntime "ocm.software/open-component-model/bindings/go/descriptor/runtime"
+	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/plugin/manager"
 	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
 	"ocm.software/open-component-model/bindings/go/runtime"
@@ -249,32 +251,81 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 		}
 	}
 
-	descs := []*descriptor.Descriptor{referencedDescriptor}
+	descs := []*descruntime.Descriptor{referencedDescriptor}
 	if len(referencedDescriptor.Component.References) > 0 {
-		// TODO: Reference filtering
 		resAndDis := resolverAndDiscoverer{
 			repositoryResolver: cacheBackedRepo.GetRepositoryResolver(),
 		}
-		discoverer := syncdag.NewGraphDiscoverer(&syncdag.GraphDiscovererOptions[string, *descriptor.Descriptor]{
-			Roots:      []string{referencedDescriptor.Component.Name},
+
+		var componentIDs []string
+		for _, reference := range referencedDescriptor.Component.References {
+			componentIDs = append(componentIDs, reference.ToComponentIdentity().String())
+		}
+
+		discoverer := syncdag.NewGraphDiscoverer(&syncdag.GraphDiscovererOptions[string, *descruntime.Descriptor]{
+			Roots:      componentIDs,
 			Resolver:   &resAndDis,
 			Discoverer: &resAndDis,
 		})
-		discoverer.Graph()
+
+		if err := discoverer.Discover(ctx); err != nil {
+			status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetComponentVersionFailedReason, err.Error())
+			return ctrl.Result{}, fmt.Errorf("failed to discover component version: %w", err)
+		}
+
+		x := discoverer.Graph()
+
+		err = x.WithReadLock(func(d *dag.DirectedAcyclicGraph[string]) error {
+			for _, vert := range d.Vertices {
+				val, ok := vert.Attributes["dag/value"]
+				if !ok {
+					continue
+				}
+				desc, ok := val.(*descruntime.Descriptor)
+				if !ok {
+					continue
+				}
+
+				// TODO: Filter for component reference name before filtering
+				//       What do we filter for? Component reference name or component version name that is referenced?
+				//       If the reference name is used (=! referenced component version name) than, we do not know that here.
+
+				descs = append(descs, desc)
+			}
+			return nil
+		})
+		if err != nil {
+			status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetComponentVersionFailedReason, err.Error())
+			return ctrl.Result{}, fmt.Errorf("failed to discover component version: %w", err)
+		}
 	}
 
 	// TODO: Resource filtering
 	if discovery.Spec.ResourceFilter != "" {
 	}
 
-	raw, err := json.Marshal(descs)
+	descsV2 := make([]*v2.Descriptor, 0, len(descs))
+	for _, desc := range descs {
+		// TODO: Think about WithAllowUnknown
+		descV2, err := descruntime.ConvertToV2(runtime.NewScheme(runtime.WithAllowUnknown()), desc)
+		if err != nil {
+			status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetComponentVersionFailedReason, err.Error())
+			return ctrl.Result{}, fmt.Errorf("failed to convert descriptor: %w", err)
+		}
+
+		descsV2 = append(descsV2, descV2)
+	}
+
+	// Wrap in an object: status.discovery is declared type=object in the CRD,
+	// so a bare JSON array would be rejected by schema validation.
+	raw, err := json.Marshal(discoveryResult{Components: descsV2})
 	if err != nil {
 		status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetComponentVersionFailedReason, err.Error())
-		return ctrl.Result{}, fmt.Errorf("PLACEHOLDER", err)
+		return ctrl.Result{}, fmt.Errorf("failed to marshal discovery result: %w", err)
 	}
 
 	//resourceIdentity := resource.Spec.Resource.ByReference.Resource
-	//var matchedResource *descriptor.Resource
+	//var matchedResource *descruntime.Resource
 	//for i, res := range resourceDescriptor.Component.Resources {
 	//	resIdentity := res.ToIdentity()
 	//	if resourceIdentity.Match(resIdentity, ocm.IdentityFuncIgnoreVersion()) {
@@ -302,6 +353,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 	return ctrl.Result{}, nil
 }
 
+// discoveryResult is the object written to Discovery.Status.Discovery. The
+// discovered component descriptors are nested under a named field so the
+// serialized value is a JSON object, matching the CRD schema which declares
+// the status.discovery field as +kubebuilder:validation:Type=object.
+type discoveryResult struct {
+	Components []*v2.Descriptor `json:"components"`
+}
+
 // setResourceStatus updates the resource status with all required information.
 func setDiscoveryStatus(
 	ctx context.Context,
@@ -322,17 +381,17 @@ type resolverAndDiscoverer struct {
 }
 
 var (
-	_ syncdag.Resolver[string, *descriptor.Descriptor]   = (*resolverAndDiscoverer)(nil)
-	_ syncdag.Discoverer[string, *descriptor.Descriptor] = (*resolverAndDiscoverer)(nil)
+	_ syncdag.Resolver[string, *descruntime.Descriptor]   = (*resolverAndDiscoverer)(nil)
+	_ syncdag.Discoverer[string, *descruntime.Descriptor] = (*resolverAndDiscoverer)(nil)
 )
 
-func (r *resolverAndDiscoverer) Resolve(ctx context.Context, key string) (*descriptor.Descriptor, error) {
+func (r *resolverAndDiscoverer) Resolve(ctx context.Context, key string) (*descruntime.Descriptor, error) {
 	id, err := runtime.ParseIdentity(key)
 	if err != nil {
 		return nil, fmt.Errorf("parsing identity %q failed: %w", key, err)
 	}
 
-	component, version := id[descriptor.IdentityAttributeName], id[descriptor.IdentityAttributeVersion]
+	component, version := id[descruntime.IdentityAttributeName], id[descruntime.IdentityAttributeVersion]
 	repo, err := r.repositoryResolver.GetComponentVersionRepositoryForComponent(ctx, component, version)
 	if err != nil {
 		return nil, fmt.Errorf("getting component version repository for identity %q failed: %w", id, err)
@@ -346,7 +405,7 @@ func (r *resolverAndDiscoverer) Resolve(ctx context.Context, key string) (*descr
 	return desc, nil
 }
 
-func (r *resolverAndDiscoverer) Discover(ctx context.Context, parent *descriptor.Descriptor) ([]string, error) {
+func (r *resolverAndDiscoverer) Discover(ctx context.Context, parent *descruntime.Descriptor) ([]string, error) {
 	logger := log.FromContext(ctx)
 
 	// unlimited recursion

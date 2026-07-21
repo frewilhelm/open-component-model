@@ -21,7 +21,7 @@ import (
 	"ocm.software/open-component-model/kubernetes/controller/internal/test"
 )
 
-var _ = Describe("Resource Controller", func() {
+var _ = Describe("Discovery Controller", func() {
 	var tempDir string
 
 	BeforeEach(func() {
@@ -53,8 +53,15 @@ var _ = Describe("Resource Controller", func() {
 		It("reconcile a nested component by reference path", func(ctx SpecContext) {
 			By("creating a CTF")
 			ctfName := "nested-component"
-			nestedComponentName := "ocm.software/nested-component"
-			nestedComponentReference := "some-reference"
+
+			nestedComponentName1 := "ocm.software/nested-component-1"
+			nestedComponentName2 := "ocm.software/nested-component-2"
+			nestedComponentName3 := "ocm.software/nested-component-3"
+			nestedComponentName4 := "ocm.software/nested-component-4"
+
+			nestedNestedComponentName1 := "ocm.software/nested-nested-component-1"
+			nestedNestedComponentName2 := "ocm.software/nested-nested-component-2"
+
 			ctfPath := filepath.Join(tempDir, ctfName)
 			Expect(os.MkdirAll(ctfPath, 0o777)).To(Succeed())
 			_, specData := test.SetupCTFComponentVersionRepository(ctx, ctfPath, []*descruntime.Descriptor{
@@ -70,11 +77,38 @@ var _ = Describe("Resource Controller", func() {
 							{
 								ElementMeta: descruntime.ElementMeta{
 									ObjectMeta: descruntime.ObjectMeta{
-										Name:    nestedComponentReference,
+										Name:    "nested-component-1",
 										Version: componentVersion,
 									},
 								},
-								Component: nestedComponentName,
+								Component: nestedComponentName1,
+							},
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{
+										Name:    "nested-component-2",
+										Version: componentVersion,
+									},
+								},
+								Component: nestedComponentName2,
+							},
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{
+										Name:    "nested-component-3",
+										Version: componentVersion,
+									},
+								},
+								Component: nestedComponentName3,
+							},
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{
+										Name:    "nested-component-4",
+										Version: componentVersion,
+									},
+								},
+								Component: nestedComponentName4,
 							},
 						},
 						Provider: descruntime.Provider{Name: "ocm.software"},
@@ -84,7 +118,7 @@ var _ = Describe("Resource Controller", func() {
 					Component: descruntime.Component{
 						ComponentMeta: descruntime.ComponentMeta{
 							ObjectMeta: descruntime.ObjectMeta{
-								Name:    nestedComponentName,
+								Name:    nestedComponentName1,
 								Version: componentVersion,
 							},
 						},
@@ -92,7 +126,187 @@ var _ = Describe("Resource Controller", func() {
 							{
 								ElementMeta: descruntime.ElementMeta{
 									ObjectMeta: descruntime.ObjectMeta{
-										Name:    discoveryName,
+										Name:    "resource-a",
+										Version: "1.0.0",
+									},
+								},
+								Type:     "ociArtifact",
+								Relation: descruntime.ExternalRelation,
+								Access: &runtime.Raw{
+									Type: runtime.Type{
+										Name:    "ociArtifact",
+										Version: "v1",
+									},
+									Data: mustMarshalJSON(map[string]any{
+										"imageReference": "ghcr.io/open-component-model/ocm/ocm.software/ocmcli/ocmcli-image:0.23.0",
+									}),
+								},
+							},
+						},
+						Provider: descruntime.Provider{Name: "ocm.software"},
+					},
+				},
+				{
+					Component: descruntime.Component{
+						ComponentMeta: descruntime.ComponentMeta{
+							ObjectMeta: descruntime.ObjectMeta{
+								Name:    nestedComponentName2,
+								Version: componentVersion,
+							},
+						},
+						Resources: []descruntime.Resource{
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{
+										Name:    "resource-b",
+										Version: "1.0.0",
+									},
+								},
+								Type:     "ociArtifact",
+								Relation: descruntime.ExternalRelation,
+								Access: &runtime.Raw{
+									Type: runtime.Type{
+										Name:    "ociArtifact",
+										Version: "v1",
+									},
+									Data: mustMarshalJSON(map[string]any{
+										"imageReference": "ghcr.io/open-component-model/ocm/ocm.software/ocmcli/ocmcli-image:0.23.0",
+									}),
+								},
+							},
+						},
+						Provider: descruntime.Provider{Name: "ocm.software"},
+					},
+				},
+				{
+					Component: descruntime.Component{
+						ComponentMeta: descruntime.ComponentMeta{
+							ObjectMeta: descruntime.ObjectMeta{
+								Name:    nestedComponentName3,
+								Version: componentVersion,
+							},
+						},
+						Resources: []descruntime.Resource{
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{
+										Name:    "resource-c",
+										Version: "1.0.0",
+									},
+								},
+								Type:     "ociArtifact",
+								Relation: descruntime.ExternalRelation,
+								Access: &runtime.Raw{
+									Type: runtime.Type{
+										Name:    "ociArtifact",
+										Version: "v1",
+									},
+									Data: mustMarshalJSON(map[string]any{
+										"imageReference": "ghcr.io/open-component-model/ocm/ocm.software/ocmcli/ocmcli-image:0.23.0",
+									}),
+								},
+							},
+						},
+						Provider: descruntime.Provider{Name: "ocm.software"},
+					},
+				},
+				{
+					Component: descruntime.Component{
+						ComponentMeta: descruntime.ComponentMeta{
+							ObjectMeta: descruntime.ObjectMeta{
+								Name:    nestedComponentName4,
+								Version: componentVersion,
+							},
+						},
+						References: []descruntime.Reference{
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{
+										Name:    "nested-nested-component-1",
+										Version: componentVersion,
+									},
+								},
+								Component: nestedNestedComponentName1,
+							},
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{
+										Name:    "nested-nested-component-2",
+										Version: componentVersion,
+									},
+								},
+								Component: nestedNestedComponentName2,
+							},
+						},
+						Resources: []descruntime.Resource{
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{
+										Name:    "resource-d",
+										Version: "1.0.0",
+									},
+								},
+								Type:     "ociArtifact",
+								Relation: descruntime.ExternalRelation,
+								Access: &runtime.Raw{
+									Type: runtime.Type{
+										Name:    "ociArtifact",
+										Version: "v1",
+									},
+									Data: mustMarshalJSON(map[string]any{
+										"imageReference": "ghcr.io/open-component-model/ocm/ocm.software/ocmcli/ocmcli-image:0.23.0",
+									}),
+								},
+							},
+						},
+						Provider: descruntime.Provider{Name: "ocm.software"},
+					},
+				},
+				{
+					Component: descruntime.Component{
+						ComponentMeta: descruntime.ComponentMeta{
+							ObjectMeta: descruntime.ObjectMeta{
+								Name:    nestedNestedComponentName1,
+								Version: componentVersion,
+							},
+						},
+						Resources: []descruntime.Resource{
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{
+										Name:    "resource-a-1",
+										Version: "1.0.0",
+									},
+								},
+								Type:     "ociArtifact",
+								Relation: descruntime.ExternalRelation,
+								Access: &runtime.Raw{
+									Type: runtime.Type{
+										Name:    "ociArtifact",
+										Version: "v1",
+									},
+									Data: mustMarshalJSON(map[string]any{
+										"imageReference": "ghcr.io/open-component-model/ocm/ocm.software/ocmcli/ocmcli-image:0.23.0",
+									}),
+								},
+							},
+						},
+						Provider: descruntime.Provider{Name: "ocm.software"},
+					},
+				},
+				{
+					Component: descruntime.Component{
+						ComponentMeta: descruntime.ComponentMeta{
+							ObjectMeta: descruntime.ObjectMeta{
+								Name:    nestedNestedComponentName2,
+								Version: componentVersion,
+							},
+						},
+						Resources: []descruntime.Resource{
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{
+										Name:    "resource-a-2",
 										Version: "1.0.0",
 									},
 								},
@@ -136,30 +350,24 @@ var _ = Describe("Resource Controller", func() {
 			})
 
 			By("creating a discovery")
-			resourceObj := &v1alpha1.Discovery{
+			discoveryObj := &v1alpha1.Discovery{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      discoveryName,
 					Namespace: namespace.GetName(),
 				},
-				Spec: v1alpha1.ResourceSpec{
+				Spec: v1alpha1.DiscoverySpec{
 					ComponentRef: corev1.LocalObjectReference{
 						Name: componentObj.GetName(),
 					},
-					Resource: v1alpha1.ResourceID{
-						ByReference: v1alpha1.ResourceReference{
-							Resource:      runtime.Identity{"name": discoveryName},
-							ReferencePath: []runtime.Identity{{"name": nestedComponentReference}},
-						},
-					},
-					AdditionalStatusFields: &apiextensionsv1.JSON{Raw: mustMarshalJSON(map[string]any{
-						"reference": "resource.access.toOCI().reference",
-					})},
 				},
 			}
-			Expect(k8sClient.Create(ctx, resourceObj)).To(Succeed())
+			Expect(k8sClient.Create(ctx, discoveryObj)).To(Succeed())
 			DeferCleanup(func(ctx SpecContext) {
-				test.DeleteObject(ctx, k8sClient, resourceObj)
+				test.DeleteObject(ctx, k8sClient, discoveryObj)
 			})
+
+			By("checking that the discovery has been reconciled successfully")
+			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
 		})
 	})
 })
