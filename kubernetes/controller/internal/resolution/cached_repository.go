@@ -48,6 +48,10 @@ type CacheBackedRepository struct {
 
 var _ repository.ComponentVersionRepository = (*CacheBackedRepository)(nil)
 
+func (c *CacheBackedRepository) GetRepositoryResolver() resolvers.ComponentVersionRepositoryResolver {
+	return c.resolver
+}
+
 // AddComponentVersion adds a component version to the underlying repository.
 func (c *CacheBackedRepository) AddComponentVersion(ctx context.Context, desc *descriptor.Descriptor) error {
 	repo, err := c.resolver.GetComponentVersionRepositoryForComponent(ctx, desc.Component.Name, desc.Component.Version)
