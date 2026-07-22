@@ -168,6 +168,66 @@ spec:
                     required:
                     - resource
                     type: object
+                  bySelector:
+                    description: |-
+                      BySelector selects resources matching the given selector.
+                      See https://github.com/open-component-model/ocm-project/issues/296
+                    properties:
+                      matchExpressions:
+                        description: |-
+                          MatchExpressions is a list of requirements for complex matching
+                          (NotIn, SemverRange, Exists, DoesNotExist, multi-value In).
+                        items:
+                          description: SelectorRequirement is a single requirement
+                            on an element's identity attributes or labels.
+                          properties:
+                            key:
+                              description: |-
+                                Key is the attribute to match against.
+                                Well-known keys: "name", "version", "labels".
+                                Any other key is matched against extra identity attributes.
+                                When key is "labels", values are matched against element label names
+                                (for Exists/DoesNotExist) or "name=value" pairs (for In/NotIn).
+                              type: string
+                            operator:
+                              description: Operator is the comparison operator.
+                              enum:
+                              - In
+                              - NotIn
+                              - Exists
+                              - DoesNotExist
+                              - SemverRange
+                              type: string
+                            values:
+                              description: |-
+                                Values is the set of values for the operator.
+                                For In and NotIn, at least one value is required.
+                                For Exists and DoesNotExist, values contain the label/attribute names to check.
+                                For SemverRange, exactly one value (the constraint string) is required.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                      matchIdentity:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          MatchIdentity is a map of {key,value} pairs matched against identity attributes.
+                          Each entry is equivalent to a matchExpressions entry with operator In and a single value.
+                        type: object
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          MatchLabels is a map of {labelName,labelValue} pairs matched against element labels.
+                          Each entry is equivalent to a matchExpressions entry with key "labels", operator In,
+                          and value "labelName=labelValue".
+                        type: object
+                    type: object
                 required:
                 - byReference
                 type: object

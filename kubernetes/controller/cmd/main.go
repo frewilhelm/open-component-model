@@ -46,6 +46,7 @@ import (
 	"ocm.software/open-component-model/kubernetes/controller/internal/controller/deployer"
 	"ocm.software/open-component-model/kubernetes/controller/internal/controller/deployer/cache"
 	"ocm.software/open-component-model/kubernetes/controller/internal/controller/deployer/dynamic"
+	"ocm.software/open-component-model/kubernetes/controller/internal/controller/discovery"
 	"ocm.software/open-component-model/kubernetes/controller/internal/controller/replication"
 	"ocm.software/open-component-model/kubernetes/controller/internal/controller/repository"
 	"ocm.software/open-component-model/kubernetes/controller/internal/controller/resource"
@@ -356,6 +357,20 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Deployer")
 		os.Exit(1)
 	}
+
+	if err = (&discovery.Reconciler{
+		BaseReconciler: &ocm.BaseReconciler{
+			Client:        mgr.GetClient(),
+			Scheme:        mgr.GetScheme(),
+			EventRecorder: eventsRecorder,
+		},
+		Resolver:      resolver,
+		PluginManager: pm,
+	}).SetupWithManager(ctx, mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Discovery")
+		os.Exit(1)
+	}
+
 	if err = (&v1alpha1.Component{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "Component")
 		os.Exit(1)
@@ -370,6 +385,10 @@ func main() {
 	}
 	if err = (&v1alpha1.Resource{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "Resource")
+		os.Exit(1)
+	}
+	if err = (&v1alpha1.Discovery{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "Discovery")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

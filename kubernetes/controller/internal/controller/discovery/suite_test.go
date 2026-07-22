@@ -167,7 +167,7 @@ var _ = BeforeSuite(func() {
 		},
 		Resolver:      resolver,
 		PluginManager: pm,
-	}).SetupWithManager(ctx, k8sManager, 1)).To(Succeed())
+	}).SetupWithManager(ctx, k8sManager)).To(Succeed())
 
 	mgrDone := make(chan struct{})
 	go func() {

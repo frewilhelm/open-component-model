@@ -10,23 +10,50 @@ import (
 
 const KindDiscovery = "Discovery"
 
-// DiscoverySpec defines the desired state of Resource.
+// DiscoverySpec defines the desired state of Discovery.
 type DiscoverySpec struct {
-	// ComponentRef is a reference to a Component.
+	// ComponentRef is a reference to the umbrella Component object.
 	// +required
 	ComponentRef corev1.LocalObjectReference `json:"componentRef"`
 
-	ReferenceFilter string `json:"referenceFilter,omitempty"`
+	// ReferenceSelector selects which component references to traverse/discover.
+	// Only references matching this selector are included in the discovery result.
+	// An empty/nil selector discovers all references.
+	// +optional
+	ReferenceSelector *Selector `json:"referenceSelector,omitempty"`
 
-	ResourceFilter string `json:"resourceFilter,omitempty"`
+	// ResourceSelector selects which resources to include per discovered component.
+	// Only resources matching this selector appear in the status.
+	// An empty/nil selector includes all resources.
+	// +optional
+	ResourceSelector *Selector `json:"resourceSelector,omitempty"`
+
+	// TODO: Discuss naming — "recursive" mirrors the CLI, "depth" might be clearer for K8s users.
+	// Recursive limits how deep the controller traverses component references.
+	// 0 = only the root component (no reference traversal).
+	// When unset or nil, traversal is unlimited.
+	// Values > 0 (specific depth levels) are not yet supported.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=0
+	Recursive *int32 `json:"recursive,omitempty"`
 
 	// OCMConfig defines references to secrets, config maps or ocm api
 	// objects providing configuration data including credentials.
 	// +optional
 	OCMConfig []OCMConfiguration `json:"ocmConfig,omitempty"`
 
+	// DiscoveryFields defines additional fields to extract from each discovered resource.
+	// Keys are the output field names, values are JSONPath expressions relative to
+	// each resource object (e.g. "access.imageReference").
+	// When set, status.discovery contains a compact representation with component
+	// identity, resource name, and the extracted fields.
+	// When empty, the full component descriptors are returned.
+	// +optional
+	DiscoveryFields map[string]string `json:"discoveryFields,omitempty"`
+
 	// Suspend tells the controller to suspend the reconciliation of this
-	// Resource.
+	// Discovery.
 	// +optional
 	Suspend bool `json:"suspend,omitempty"`
 }
@@ -48,8 +75,8 @@ type DiscoveryStatus struct {
 	// +optional
 	EffectiveOCMConfig []OCMConfiguration `json:"effectiveOCMConfig,omitempty"`
 
-	// +kubebuilder:validation:Type=object
 	// +kubebuilder:validation:XPreserveUnknownFields
+	// +kubebuilder:validation:Schemaless
 	// +optional
 	Discovery *apiextensionsv1.JSON `json:"discovery,omitempty"`
 }

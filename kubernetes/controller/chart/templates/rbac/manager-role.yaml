@@ -32,6 +32,7 @@ rules:
     resources:
       - components
       - deployers
+      - discoveries
       - replications
       - repositories
       - resources
@@ -57,6 +58,7 @@ rules:
     resources:
       - components/status
       - deployers/status
+      - discoveries/status
       - replications/status
       - repositories/status
       - resources/status

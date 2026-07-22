@@ -6,17 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
+	"strings"
 
-	"golang.org/x/time/rate"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -34,6 +31,7 @@ import (
 	"ocm.software/open-component-model/kubernetes/controller/internal/ocm"
 	"ocm.software/open-component-model/kubernetes/controller/internal/resolution"
 	"ocm.software/open-component-model/kubernetes/controller/internal/resolution/workerpool"
+	"ocm.software/open-component-model/kubernetes/controller/internal/selector"
 	"ocm.software/open-component-model/kubernetes/controller/internal/status"
 	"ocm.software/open-component-model/kubernetes/controller/internal/util"
 	"ocm.software/open-component-model/kubernetes/controller/internal/verification"
@@ -54,7 +52,7 @@ type Reconciler struct {
 
 var _ ocm.Reconciler = (*Reconciler)(nil)
 
-func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, concurrency int) error {
+func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
 	// Build index for discoveries that reference a component to make sure that we get notified when a component changes.
 	const fieldName = "spec.componentRef.name"
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &v1alpha1.Discovery{}, fieldName, func(obj client.Object) []string {
@@ -102,18 +100,11 @@ func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, con
 
 				return requests
 			}), builder.WithPredicates(ComponentInfoChangedPredicate{})).
-		WithOptions(controller.Options{
-			MaxConcurrentReconciles: concurrency,
-			RateLimiter: workqueue.NewTypedMaxOfRateLimiter(
-				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](5*time.Millisecond, 5*time.Minute),
-				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(10, 100)},
-			),
-		}).
 		Complete(r)
 }
 
-// +kubebuilder:rbac:groups=delivery.ocm.software,resources=discovery,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=delivery.ocm.software,resources=discovery/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=delivery.ocm.software,resources=discoveries,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=delivery.ocm.software,resources=discoveries/status,verbs=get;update;patch
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, err error) {
 	logger := log.FromContext(ctx)
@@ -252,9 +243,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 	}
 
 	descs := []*descruntime.Descriptor{referencedDescriptor}
-	if len(referencedDescriptor.Component.References) > 0 {
+	skipReferences := discovery.Spec.Recursive != nil && *discovery.Spec.Recursive == 0 && discovery.Spec.ReferenceSelector == nil
+	if !skipReferences && len(referencedDescriptor.Component.References) > 0 {
 		resAndDis := resolverAndDiscoverer{
 			repositoryResolver: cacheBackedRepo.GetRepositoryResolver(),
+			recursive:          discovery.Spec.Recursive,
 		}
 
 		var componentIDs []string
@@ -286,10 +279,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 					continue
 				}
 
-				// TODO: Filter for component reference name before filtering
-				//       What do we filter for? Component reference name or component version name that is referenced?
-				//       If the reference name is used (=! referenced component version name) than, we do not know that here.
-
 				descs = append(descs, desc)
 			}
 			return nil
@@ -300,47 +289,115 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 		}
 	}
 
-	// TODO: Resource filtering
-	if discovery.Spec.ResourceFilter != "" {
+	// Emit warning if recursive=0 but referenceSelector is set (contradictory)
+	if discovery.Spec.Recursive != nil && *discovery.Spec.Recursive == 0 && discovery.Spec.ReferenceSelector != nil {
+		event.New(r.EventRecorder, discovery, nil, v1alpha1.EventSeverityInfo,
+			"recursive is 0 but referenceSelector is set; resolving references anyway")
 	}
 
+	// Apply ReferenceSelector: post-filter discovered descriptors (excluding root).
+	if discovery.Spec.ReferenceSelector != nil && len(descs) > 1 {
+		filtered := []*descruntime.Descriptor{descs[0]}
+		for _, desc := range descs[1:] {
+			element := componentToMatchable(desc)
+			matched, err := selector.Matches(discovery.Spec.ReferenceSelector, element)
+			if err != nil {
+				status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetComponentVersionFailedReason, err.Error())
+				return ctrl.Result{}, fmt.Errorf("failed to evaluate reference selector: %w", err)
+			}
+			if matched {
+				filtered = append(filtered, desc)
+			}
+		}
+		descs = filtered
+	}
+
+	// Apply ResourceSelector: filter resources on each descriptor
+	if discovery.Spec.ResourceSelector != nil {
+		for _, desc := range descs {
+			filtered := make([]descruntime.Resource, 0, len(desc.Component.Resources))
+			for _, res := range desc.Component.Resources {
+				element := resourceToMatchable(&res)
+				matched, err := selector.Matches(discovery.Spec.ResourceSelector, element)
+				if err != nil {
+					status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetComponentVersionFailedReason, err.Error())
+					return ctrl.Result{}, fmt.Errorf("failed to evaluate resource selector: %w", err)
+				}
+				if matched {
+					filtered = append(filtered, res)
+				}
+			}
+			desc.Component.Resources = filtered
+		}
+	}
+
+	// Convert to v2 descriptors
 	descsV2 := make([]*v2.Descriptor, 0, len(descs))
 	for _, desc := range descs {
-		// TODO: Think about WithAllowUnknown
 		descV2, err := descruntime.ConvertToV2(runtime.NewScheme(runtime.WithAllowUnknown()), desc)
 		if err != nil {
 			status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetComponentVersionFailedReason, err.Error())
 			return ctrl.Result{}, fmt.Errorf("failed to convert descriptor: %w", err)
 		}
-
 		descsV2 = append(descsV2, descV2)
 	}
 
-	// Wrap in an object: status.discovery is declared type=object in the CRD,
-	// so a bare JSON array would be rejected by schema validation.
-	raw, err := json.Marshal(discoveryResult{Components: descsV2})
+	// Build output based on selector/discoveryFields combination
+	hasRefSelector := discovery.Spec.ReferenceSelector != nil
+	hasResSelector := discovery.Spec.ResourceSelector != nil
+	hasFields := len(discovery.Spec.DiscoveryFields) > 0
+
+	var output any
+	switch {
+	case !hasRefSelector && !hasResSelector && !hasFields:
+		// RAW mode: full descriptors
+		if len(descsV2) == 1 {
+			output = descsV2[0]
+		} else {
+			output = descsV2
+		}
+	case hasFields:
+		// COMPACT mode: root identity + resources with extracted fields
+		compact, err := buildCompactDiscovery(descsV2, discovery.Spec.DiscoveryFields)
+		if err != nil {
+			status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetComponentVersionFailedReason, err.Error())
+			return ctrl.Result{}, fmt.Errorf("failed to build compact discovery: %w", err)
+		}
+		output = compact
+	case hasRefSelector && !hasResSelector:
+		// STRUCTURED mode: root identity + filtered full descriptors
+		root := descsV2[0]
+		output = map[string]any{
+			"component":  root.Component.Name,
+			"version":    root.Component.Version,
+			"components": descsV2[1:],
+		}
+	default:
+		// STRUCTURED mode: root identity + filtered resources (with component context)
+		root := descsV2[0]
+		var resources []map[string]any
+		for _, desc := range descsV2 {
+			for _, res := range desc.Component.Resources {
+				resJSON, _ := json.Marshal(res)
+				var resMap map[string]any
+				_ = json.Unmarshal(resJSON, &resMap)
+				resMap["component"] = desc.Component.Name
+				resMap["version"] = desc.Component.Version
+				resources = append(resources, resMap)
+			}
+		}
+		output = map[string]any{
+			"component": root.Component.Name,
+			"version":   root.Component.Version,
+			"resources": resources,
+		}
+	}
+
+	raw, err := json.Marshal(output)
 	if err != nil {
 		status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetComponentVersionFailedReason, err.Error())
 		return ctrl.Result{}, fmt.Errorf("failed to marshal discovery result: %w", err)
 	}
-
-	//resourceIdentity := resource.Spec.Resource.ByReference.Resource
-	//var matchedResource *descruntime.Resource
-	//for i, res := range resourceDescriptor.Component.Resources {
-	//	resIdentity := res.ToIdentity()
-	//	if resourceIdentity.Match(resIdentity, ocm.IdentityFuncIgnoreVersion()) {
-	//		matchedResource = &resourceDescriptor.Component.Resources[i]
-	//		break
-	//	}
-	//}
-
-	// if matchedResource == nil {
-	//	err := fmt.Errorf("resource with identity %v not found in component %s:%s",
-	//		resourceIdentity, resourceDescriptor.Component.Name, resourceDescriptor.Component.Version)
-	//	status.MarkNotReady(r.EventRecorder, resource, v1alpha1.GetOCMResourceFailedReason, err.Error())
-
-	//	return ctrl.Result{}, err
-	//}
 
 	if err = setDiscoveryStatus(ctx, configs, discovery, &apiextensionsv1.JSON{Raw: raw}); err != nil {
 		status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.StatusSetFailedReason, err.Error())
@@ -351,14 +408,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 	status.MarkReady(r.EventRecorder, discovery, "Discovered %s", discovery.Spec.ComponentRef)
 
 	return ctrl.Result{}, nil
-}
-
-// discoveryResult is the object written to Discovery.Status.Discovery. The
-// discovered component descriptors are nested under a named field so the
-// serialized value is a JSON object, matching the CRD schema which declares
-// the status.discovery field as +kubebuilder:validation:Type=object.
-type discoveryResult struct {
-	Components []*v2.Descriptor `json:"components"`
 }
 
 // setResourceStatus updates the resource status with all required information.
@@ -376,8 +425,118 @@ func setDiscoveryStatus(
 	return nil
 }
 
+// compactComponent is the hierarchical per-component entry in compact discovery output.
+type compactComponent struct {
+	Component  string             `json:"component"`
+	Version    string             `json:"version"`
+	Resources  []map[string]any   `json:"resources,omitempty"`
+	References []compactComponent `json:"references,omitempty"`
+}
+
+// buildCompactDiscovery creates a hierarchical compact discovery result.
+// The root component is top-level, with nested references indented below it.
+// Each resource entry contains its name plus any extracted fields directly (no wrapper).
+func buildCompactDiscovery(descs []*v2.Descriptor, fields map[string]string) (*compactComponent, error) {
+	if len(descs) == 0 {
+		return nil, nil
+	}
+
+	// Build a lookup map: componentName+version → descriptor
+	descMap := make(map[string]*v2.Descriptor, len(descs))
+	for _, desc := range descs {
+		key := desc.Component.Name + ":" + desc.Component.Version
+		descMap[key] = desc
+	}
+
+	// Build the tree starting from the root (first descriptor)
+	root := descs[0]
+	result, err := buildCompactNode(root, descMap, fields)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func buildCompactNode(desc *v2.Descriptor, descMap map[string]*v2.Descriptor, fields map[string]string) (*compactComponent, error) {
+	node := &compactComponent{
+		Component: desc.Component.Name,
+		Version:   desc.Component.Version,
+	}
+
+	// Extract fields from each resource
+	for _, res := range desc.Component.Resources {
+		resJSON, err := json.Marshal(res)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal resource %s: %w", res.Name, err)
+		}
+		var resMap map[string]any
+		if err := json.Unmarshal(resJSON, &resMap); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal resource %s: %w", res.Name, err)
+		}
+
+		entry := map[string]any{"name": res.Name}
+		for fieldName, path := range fields {
+			val := extractPath(resMap, path)
+			if val != nil {
+				entry[fieldName] = val
+			}
+		}
+
+		node.Resources = append(node.Resources, entry)
+	}
+
+	// Recursively build child references
+	for _, ref := range desc.Component.References {
+		key := ref.Component + ":" + ref.Version
+		childDesc, ok := descMap[key]
+		if !ok {
+			continue
+		}
+		child, err := buildCompactNode(childDesc, descMap, fields)
+		if err != nil {
+			return nil, err
+		}
+		node.References = append(node.References, *child)
+	}
+
+	return node, nil
+}
+
+// extractPath extracts a value from a nested map using dot-separated path notation.
+// For example, "access.imageReference" extracts map["access"]["imageReference"].
+func extractPath(data map[string]any, path string) any {
+	parts := splitPath(path)
+	var current any = data
+
+	for _, part := range parts {
+		m, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current, ok = m[part]
+		if !ok {
+			return nil
+		}
+	}
+
+	return current
+}
+
+// splitPath splits a dot-separated path into parts.
+func splitPath(path string) []string {
+	var parts []string
+	for _, p := range strings.Split(path, ".") {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return parts
+}
+
 type resolverAndDiscoverer struct {
 	repositoryResolver resolvers.ComponentVersionRepositoryResolver
+	recursive          *int32
 }
 
 var (
@@ -408,13 +567,57 @@ func (r *resolverAndDiscoverer) Resolve(ctx context.Context, key string) (*descr
 func (r *resolverAndDiscoverer) Discover(ctx context.Context, parent *descruntime.Descriptor) ([]string, error) {
 	logger := log.FromContext(ctx)
 
-	// unlimited recursion
-	children := make([]string, len(parent.Component.References))
-	for index, reference := range parent.Component.References {
-		children[index] = reference.ToComponentIdentity().String()
+	switch {
+	case r.recursive == nil:
+		// Unlimited recursion
+		children := make([]string, len(parent.Component.References))
+		for i, ref := range parent.Component.References {
+			children[i] = ref.ToComponentIdentity().String()
+		}
+		logger.Info("discovering children", "component", parent.Component.ToIdentity().String(), "children", children)
+		return children, nil
+	case *r.recursive == 0:
+		logger.Info("not discovering children, recursive is 0", "component", parent.Component.ToIdentity().String())
+		return nil, nil
+	default:
+		// >0: not implemented yet
+		return nil, fmt.Errorf("recursive depth %d is not supported yet, use 0 or leave unset for unlimited", *r.recursive)
+	}
+}
+
+// componentToMatchable converts a discovered component descriptor into a Matchable for selector evaluation.
+// Identity contains the component name and version.
+func componentToMatchable(desc *descruntime.Descriptor) selector.Matchable {
+	identity := desc.Component.ToIdentity()
+
+	labels := make(map[string]string, len(desc.Component.Labels))
+	for _, l := range desc.Component.Labels {
+		var s string
+		if err := json.Unmarshal(l.Value, &s); err == nil {
+			labels[l.Name] = s
+		}
 	}
 
-	logger.Info("discovering children", "component", parent.Component.ToIdentity().String(), "children", children)
+	return selector.Matchable{
+		Identity: identity,
+		Labels:   labels,
+	}
+}
 
-	return children, nil
+// resourceToMatchable converts a resource into a Matchable for selector evaluation.
+func resourceToMatchable(res *descruntime.Resource) selector.Matchable {
+	identity := res.ToIdentity()
+
+	labels := make(map[string]string, len(res.Labels))
+	for _, l := range res.Labels {
+		var s string
+		if err := json.Unmarshal(l.Value, &s); err == nil {
+			labels[l.Name] = s
+		}
+	}
+
+	return selector.Matchable{
+		Identity: identity,
+		Labels:   labels,
+	}
 }

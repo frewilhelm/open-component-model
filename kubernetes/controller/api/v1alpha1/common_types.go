@@ -84,8 +84,72 @@ type Verification struct {
 type ResourceID struct {
 	// +required
 	ByReference ResourceReference `json:"byReference,omitempty"`
-	// TODO: Implement BySelector (see https://github.com/open-component-model/ocm-project/issues/296)
+
+	// BySelector selects resources matching the given selector.
+	// See https://github.com/open-component-model/ocm-project/issues/296
+	// +optional
+	BySelector *Selector `json:"bySelector,omitempty"`
 }
+
+// Selector selects OCM elements by identity attributes and/or labels.
+// All specified fields are ANDed. An empty selector matches everything.
+type Selector struct {
+	// MatchIdentity is a map of {key,value} pairs matched against identity attributes.
+	// Each entry is equivalent to a matchExpressions entry with operator In and a single value.
+	// +optional
+	MatchIdentity map[string]string `json:"matchIdentity,omitempty"`
+
+	// MatchLabels is a map of {labelName,labelValue} pairs matched against element labels.
+	// Each entry is equivalent to a matchExpressions entry with key "labels", operator In,
+	// and value "labelName=labelValue".
+	// +optional
+	MatchLabels map[string]string `json:"matchLabels,omitempty"`
+
+	// MatchExpressions is a list of requirements for complex matching
+	// (NotIn, SemverRange, Exists, DoesNotExist, multi-value In).
+	// +optional
+	MatchExpressions []SelectorRequirement `json:"matchExpressions,omitempty"`
+}
+
+// SelectorRequirement is a single requirement on an element's identity attributes or labels.
+type SelectorRequirement struct {
+	// Key is the attribute to match against.
+	// Well-known keys: "name", "version", "labels".
+	// Any other key is matched against extra identity attributes.
+	// When key is "labels", values are matched against element label names
+	// (for Exists/DoesNotExist) or "name=value" pairs (for In/NotIn).
+	// +required
+	Key string `json:"key"`
+
+	// Operator is the comparison operator.
+	// +required
+	// +kubebuilder:validation:Enum=In;NotIn;Exists;DoesNotExist;SemverRange
+	Operator SelectorOperator `json:"operator"`
+
+	// Values is the set of values for the operator.
+	// For In and NotIn, at least one value is required.
+	// For Exists and DoesNotExist, values contain the label/attribute names to check.
+	// For SemverRange, exactly one value (the constraint string) is required.
+	// +optional
+	Values []string `json:"values,omitempty"`
+}
+
+// SelectorOperator defines the operator for a selector requirement.
+// +kubebuilder:validation:Enum=In;NotIn;Exists;DoesNotExist;SemverRange
+type SelectorOperator string
+
+const (
+	// SelectorOpIn matches when the attribute value is one of the specified values.
+	SelectorOpIn SelectorOperator = "In"
+	// SelectorOpNotIn matches when the attribute value is not one of the specified values.
+	SelectorOpNotIn SelectorOperator = "NotIn"
+	// SelectorOpExists matches when the attribute or label exists (regardless of value).
+	SelectorOpExists SelectorOperator = "Exists"
+	// SelectorOpDoesNotExist matches when the attribute or label does not exist.
+	SelectorOpDoesNotExist SelectorOperator = "DoesNotExist"
+	// SelectorOpSemverRange matches the attribute value against a semver constraint.
+	SelectorOpSemverRange SelectorOperator = "SemverRange"
+)
 
 // ResourceReference defines a reference to a resource akin to the OCM Specification.
 // For more details see dedicated guide in the Specification:

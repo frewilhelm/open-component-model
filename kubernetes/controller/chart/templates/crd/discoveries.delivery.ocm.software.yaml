@@ -1,11 +1,29 @@
----
+{{- if .Values.crd.enable }}
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
+    {{- if .Values.crd.keep }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+    {{- if and .Values.webhook.enable .Values.certManager.enable }}
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "ocm-k8s-toolkit.resourceName" (dict "suffix" "serving-cert" "context" $) }}
+    {{- end }}
   name: discoveries.delivery.ocm.software
 spec:
+  {{- if .Values.webhook.enable }}
+  conversion:
+    strategy: Webhook
+    webhook:
+      clientConfig:
+        service:
+          name: {{ include "ocm-k8s-toolkit.resourceName" (dict "suffix" "webhook-service" "context" $) }}
+          namespace: {{ .Release.Namespace }}
+          path: /convert
+      conversionReviewVersions:
+        - v1
+  {{- end }}
   group: delivery.ocm.software
   names:
     kind: Discovery
@@ -390,3 +408,4 @@ spec:
     storage: true
     subresources:
       status: {}
+{{- end }}

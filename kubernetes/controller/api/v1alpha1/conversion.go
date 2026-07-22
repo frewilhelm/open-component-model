@@ -8,6 +8,7 @@ func (*Component) Hub()  {}
 func (*Deployer) Hub()   {}
 func (*Repository) Hub() {}
 func (*Resource) Hub()   {}
+func (*Discovery) Hub()  {}
 
 func (r *Component) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, r).Complete()
@@ -22,5 +23,9 @@ func (r *Repository) SetupWebhookWithManager(mgr ctrl.Manager) error {
 }
 
 func (r *Resource) SetupWebhookWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewWebhookManagedBy(mgr, r).Complete()
+}
+
+func (r *Discovery) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, r).Complete()
 }
