@@ -12,13 +12,13 @@ const KindDiscovery = "Discovery"
 
 // DiscoverySpec defines the desired state of Discovery.
 type DiscoverySpec struct {
-	// ComponentRef is a reference to the umbrella Component object.
+	// ComponentRef is a reference to a Component object.
 	// +required
 	ComponentRef corev1.LocalObjectReference `json:"componentRef"`
 
-	// ReferenceSelector selects which component references to traverse/discover.
+	// ReferenceSelector filters for component references from the root component object.
 	// Only references matching this selector are included in the discovery result.
-	// An empty/nil selector discovers all references.
+	// A set selector overwrite recursive = 0 (no reference traversal).
 	// +optional
 	ReferenceSelector *Selector `json:"referenceSelector,omitempty"`
 
@@ -75,6 +75,12 @@ type DiscoveryStatus struct {
 	// +optional
 	EffectiveOCMConfig []OCMConfiguration `json:"effectiveOCMConfig,omitempty"`
 
+	// Discovery contains the discovered component versions and their resources.
+	// The format depends on the spec configuration:
+	// - No selectors: full component descriptor(s)
+	// - With referenceSelector: root identity + filtered component descriptors
+	// - With resourceSelector: root identity + filtered resources
+	// - With discoveryFields: compact output with extracted fields
 	// +kubebuilder:validation:XPreserveUnknownFields
 	// +kubebuilder:validation:Schemaless
 	// +optional

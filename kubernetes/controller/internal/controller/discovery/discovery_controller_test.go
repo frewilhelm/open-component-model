@@ -382,8 +382,8 @@ var _ = Describe("Discovery Controller", func() {
 				Spec: v1alpha1.DiscoverySpec{
 					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
 					DiscoveryFields: map[string]string{
-						"imageRef": "access.imageReference",
-						"type":     "type",
+						"imageRef": "resource.access.imageReference",
+						"type":     "resource.type",
 					},
 				},
 			}
@@ -398,19 +398,12 @@ var _ = Describe("Discovery Controller", func() {
 			By("verifying compact output structure")
 			Expect(discoveryObj.Status.Discovery).NotTo(BeNil())
 
-			var compact map[string]any
+			var compact []map[string]any
 			Expect(json.Unmarshal(discoveryObj.Status.Discovery.Raw, &compact)).To(Succeed())
-			Expect(compact["component"]).To(Equal(componentName))
-			Expect(compact["version"]).To(Equal(componentVersion))
+			Expect(compact).To(HaveLen(1))
 
-			resources, ok := compact["resources"].([]any)
-			Expect(ok).To(BeTrue())
-			Expect(resources).To(HaveLen(1))
-
-			res := resources[0].(map[string]any)
-			Expect(res["name"]).To(Equal("my-image"))
-			Expect(res["imageRef"]).To(Equal("ghcr.io/example/my-image:1.0.0"))
-			Expect(res["type"]).To(Equal("ociArtifact"))
+			Expect(compact[0]["imageRef"]).To(Equal("ghcr.io/example/my-image:1.0.0"))
+			Expect(compact[0]["type"]).To(Equal("ociArtifact"))
 		})
 	})
 
@@ -629,16 +622,14 @@ var _ = Describe("Discovery Controller", func() {
 
 			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
 
-			var result map[string]any
-			Expect(json.Unmarshal(discoveryObj.Status.Discovery.Raw, &result)).To(Succeed())
-			Expect(result["component"]).To(Equal(componentName))
-			Expect(result["version"]).To(Equal(componentVersion))
-			components, ok := result["components"].([]any)
-			Expect(ok).To(BeTrue())
-			Expect(components).To(HaveLen(1))
+			result := parseDiscoveryResult(discoveryObj)
+			// Only the filtered reference (root excluded)
+			Expect(result).To(HaveLen(1))
+			names := extractComponentNames(result)
+			Expect(names).To(ContainElement(nestedName1))
 		})
 
-		It("nil recursive with reference selector should show filtered components", func(ctx SpecContext) {
+		It("nil recursive with reference selector should show filtered descriptors", func(ctx SpecContext) {
 			componentObj, _ := setupComponentTree(ctx)
 
 			namespace := test.NamespaceForTest(ctx)
@@ -661,16 +652,14 @@ var _ = Describe("Discovery Controller", func() {
 
 			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
 
-			var result map[string]any
-			Expect(json.Unmarshal(discoveryObj.Status.Discovery.Raw, &result)).To(Succeed())
-			Expect(result["component"]).To(Equal(componentName))
-			Expect(result["version"]).To(Equal(componentVersion))
-			components, ok := result["components"].([]any)
-			Expect(ok).To(BeTrue())
-			Expect(components).To(HaveLen(1))
+			result := parseDiscoveryResult(discoveryObj)
+			// Only the filtered reference (root excluded)
+			Expect(result).To(HaveLen(1))
+			names := extractComponentNames(result)
+			Expect(names).To(ContainElement(nestedName1))
 		})
 
-		It("recursive 0 with resource selector should show filtered resources from root", func(ctx SpecContext) {
+		It("recursive 0 with resource selector should show root with filtered resources", func(ctx SpecContext) {
 			componentObj, _ := setupComponentTree(ctx)
 
 			recursiveZero := int32(0)
@@ -697,18 +686,15 @@ var _ = Describe("Discovery Controller", func() {
 
 			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
 
-			var result map[string]any
-			Expect(json.Unmarshal(discoveryObj.Status.Discovery.Raw, &result)).To(Succeed())
-			Expect(result["component"]).To(Equal(componentName))
-			resources, ok := result["resources"].([]any)
-			Expect(ok).To(BeTrue())
-			Expect(resources).To(HaveLen(1))
-			res := resources[0].(map[string]any)
-			Expect(res["name"]).To(Equal("root-image"))
-			Expect(res["component"]).To(Equal(componentName))
+			// Array with single root descriptor, resources filtered
+			result := parseDiscoveryResult(discoveryObj)
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].Component.Name).To(Equal(componentName))
+			Expect(result[0].Component.Resources).To(HaveLen(1))
+			Expect(result[0].Component.Resources[0].Name).To(Equal("root-image"))
 		})
 
-		It("nil recursive with resource selector should show filtered resources from all components", func(ctx SpecContext) {
+		It("nil recursive with resource selector should show all components with filtered resources", func(ctx SpecContext) {
 			componentObj, _ := setupComponentTree(ctx)
 
 			namespace := test.NamespaceForTest(ctx)
@@ -733,16 +719,22 @@ var _ = Describe("Discovery Controller", func() {
 
 			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
 
-			var result map[string]any
-			Expect(json.Unmarshal(discoveryObj.Status.Discovery.Raw, &result)).To(Succeed())
-			Expect(result["component"]).To(Equal(componentName))
-			resources, ok := result["resources"].([]any)
-			Expect(ok).To(BeTrue())
-			// root has no "image" resource, nested-1 and nested-2 both have "image"
-			Expect(resources).To(HaveLen(2))
+			// All components in graph, each with only "image" resources
+			result := parseDiscoveryResult(discoveryObj)
+			// root + nested-1 + nested-2 (3 total), but root has no "image" so its resources are empty
+			Expect(result).To(HaveLen(3))
+			// nested-1 and nested-2 have "image" resources
+			var totalImageResources int
+			for _, desc := range result {
+				for _, res := range desc.Component.Resources {
+					Expect(res.Name).To(Equal("image"))
+					totalImageResources++
+				}
+			}
+			Expect(totalImageResources).To(Equal(2))
 		})
 
-		It("nil recursive with both selectors should show filtered resources from filtered components", func(ctx SpecContext) {
+		It("nil recursive with both selectors should show filtered components with filtered resources", func(ctx SpecContext) {
 			componentObj, _ := setupComponentTree(ctx)
 
 			namespace := test.NamespaceForTest(ctx)
@@ -770,19 +762,15 @@ var _ = Describe("Discovery Controller", func() {
 
 			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
 
-			var result map[string]any
-			Expect(json.Unmarshal(discoveryObj.Status.Discovery.Raw, &result)).To(Succeed())
-			Expect(result["component"]).To(Equal(componentName))
-			resources, ok := result["resources"].([]any)
-			Expect(ok).To(BeTrue())
-			// Only nested-1 matches refSelector, and it has one "image" resource
-			Expect(resources).To(HaveLen(1))
-			res := resources[0].(map[string]any)
-			Expect(res["name"]).To(Equal("image"))
-			Expect(res["component"]).To(Equal(nestedName1))
+			// Only nested-1 (refSelector filters, root excluded)
+			result := parseDiscoveryResult(discoveryObj)
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].Component.Name).To(Equal(nestedName1))
+			Expect(result[0].Component.Resources).To(HaveLen(1))
+			Expect(result[0].Component.Resources[0].Name).To(Equal("image"))
 		})
 
-		It("recursive 0 with both selectors should warn and show filtered resources from filtered components", func(ctx SpecContext) {
+		It("recursive 0 with both selectors should warn and show filtered components with filtered resources", func(ctx SpecContext) {
 			componentObj, _ := setupComponentTree(ctx)
 
 			recursiveZero := int32(0)
@@ -812,16 +800,12 @@ var _ = Describe("Discovery Controller", func() {
 
 			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
 
-			var result map[string]any
-			Expect(json.Unmarshal(discoveryObj.Status.Discovery.Raw, &result)).To(Succeed())
-			Expect(result["component"]).To(Equal(componentName))
-			resources, ok := result["resources"].([]any)
-			Expect(ok).To(BeTrue())
-			// Only nested-1 matches refSelector, and it has one "chart" resource
-			Expect(resources).To(HaveLen(1))
-			res := resources[0].(map[string]any)
-			Expect(res["name"]).To(Equal("chart"))
-			Expect(res["component"]).To(Equal(nestedName1))
+			// Only nested-1 (refSelector filters, root excluded)
+			result := parseDiscoveryResult(discoveryObj)
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].Component.Name).To(Equal(nestedName1))
+			Expect(result[0].Component.Resources).To(HaveLen(1))
+			Expect(result[0].Component.Resources[0].Name).To(Equal("chart"))
 		})
 	})
 

@@ -12,7 +12,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/hashicorp/golang-lru/v2/expirable"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -35,8 +34,6 @@ import (
 	ocmruntime "ocm.software/open-component-model/bindings/go/runtime"
 	"ocm.software/open-component-model/kubernetes/controller/api/v1alpha1"
 	"ocm.software/open-component-model/kubernetes/controller/internal/ocm"
-	"ocm.software/open-component-model/kubernetes/controller/internal/resolution"
-	"ocm.software/open-component-model/kubernetes/controller/internal/resolution/workerpool"
 )
 
 // +kubebuilder:scaffold:imports
@@ -142,22 +139,6 @@ var _ = BeforeSuite(func() {
 	Expect(pm.DigestProcessorRegistry.RegisterInternalDigestProcessorPlugin(ociResourceRepoPlugin)).To(Succeed())
 
 	// Setup resolver with worker pool
-	const unlimited = 0
-	ttl := time.Minute * 30
-	resolverCache := expirable.NewLRU[string, *workerpool.Result](unlimited, nil, ttl)
-
-	workerLogger := logf.Log.WithName("worker-pool")
-	workerPool := workerpool.NewWorkerPool(workerpool.PoolOptions{
-		WorkerCount: 10,
-		QueueSize:   100,
-		Logger:      &workerLogger,
-		Client:      k8sManager.GetClient(),
-		Cache:       resolverCache,
-	})
-	Expect(k8sManager.Add(workerPool)).To(Succeed())
-
-	resolutionLogger := logf.Log.WithName("resolution")
-	resolver := resolution.NewResolver(&resolutionLogger, workerPool, pm)
 
 	Expect((&Reconciler{
 		BaseReconciler: &ocm.BaseReconciler{
@@ -165,7 +146,6 @@ var _ = BeforeSuite(func() {
 			Scheme:        testEnv.Scheme,
 			EventRecorder: recorder,
 		},
-		Resolver:      resolver,
 		PluginManager: pm,
 	}).SetupWithManager(ctx, k8sManager)).To(Succeed())
 
