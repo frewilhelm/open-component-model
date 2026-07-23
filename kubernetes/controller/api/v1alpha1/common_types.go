@@ -91,65 +91,31 @@ type ResourceID struct {
 	BySelector *Selector `json:"bySelector,omitempty"`
 }
 
-// Selector selects OCM elements by identity attributes and/or labels.
-// All specified fields are ANDed. An empty selector matches everything.
+// Selector selects OCM elements by identity attributes, labels, and/or a
+// CEL predicate. All specified fields are ANDed. An empty selector matches
+// everything.
 type Selector struct {
 	// MatchIdentity is a map of {key,value} pairs matched against identity attributes.
-	// Each entry is equivalent to a matchExpressions entry with operator In and a single value.
+	// Comparison is string equality. Well-known keys are "name" and "version";
+	// element-specific keys (e.g. "componentName" on a reference) may also be used.
 	// +optional
 	MatchIdentity map[string]string `json:"matchIdentity,omitempty"`
 
-	// MatchLabels is a map of {labelName,labelValue} pairs matched against element labels.
-	// Each entry is equivalent to a matchExpressions entry with key "labels", operator In,
-	// and value "labelName=labelValue".
+	// MatchLabels is a map of {labelName,labelValue} pairs matched against element
+	// labels. Comparison is string equality; labels whose JSON value is not a
+	// string are treated as non-matches. For structured labels, use Expression.
 	// +optional
 	MatchLabels map[string]string `json:"matchLabels,omitempty"`
 
-	// MatchExpressions is a list of requirements for complex matching
-	// (NotIn, SemverRange, Exists, DoesNotExist, multi-value In).
+	// Expression is a CEL boolean expression evaluated against the element.
+	// Bindings:
+	//   identity  map<string,string>  the element's identity attributes
+	//   labels    map<string,dyn>     the element's labels with structured values
+	// Available functions include the standard CEL library plus semverCheck(v, c)
+	// for constraint matching (Masterminds/semver syntax).
 	// +optional
-	MatchExpressions []SelectorRequirement `json:"matchExpressions,omitempty"`
+	Expression string `json:"expression,omitempty"`
 }
-
-// SelectorRequirement is a single requirement on an element's identity attributes or labels.
-type SelectorRequirement struct {
-	// Key is the attribute to match against.
-	// Well-known keys: "name", "version", "labels".
-	// Any other key is matched against extra identity attributes.
-	// When key is "labels", values are matched against element label names
-	// (for Exists/DoesNotExist) or "name=value" pairs (for In/NotIn).
-	// +required
-	Key string `json:"key"`
-
-	// Operator is the comparison operator.
-	// +required
-	// +kubebuilder:validation:Enum=In;NotIn;Exists;DoesNotExist;SemverRange
-	Operator SelectorOperator `json:"operator"`
-
-	// Values is the set of values for the operator.
-	// For In and NotIn, at least one value is required.
-	// For Exists and DoesNotExist, values contain the label/attribute names to check.
-	// For SemverRange, exactly one value (the constraint string) is required.
-	// +optional
-	Values []string `json:"values,omitempty"`
-}
-
-// SelectorOperator defines the operator for a selector requirement.
-// +kubebuilder:validation:Enum=In;NotIn;Exists;DoesNotExist;SemverRange
-type SelectorOperator string
-
-const (
-	// SelectorOpIn matches when the attribute value is one of the specified values.
-	SelectorOpIn SelectorOperator = "In"
-	// SelectorOpNotIn matches when the attribute value is not one of the specified values.
-	SelectorOpNotIn SelectorOperator = "NotIn"
-	// SelectorOpExists matches when the attribute or label exists (regardless of value).
-	SelectorOpExists SelectorOperator = "Exists"
-	// SelectorOpDoesNotExist matches when the attribute or label does not exist.
-	SelectorOpDoesNotExist SelectorOperator = "DoesNotExist"
-	// SelectorOpSemverRange matches the attribute value against a semver constraint.
-	SelectorOpSemverRange SelectorOperator = "SemverRange"
-)
 
 // ResourceReference defines a reference to a resource akin to the OCM Specification.
 // For more details see dedicated guide in the Specification:

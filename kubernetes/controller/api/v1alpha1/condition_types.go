@@ -82,4 +82,26 @@ const (
 
 	// TransferCompleteReason is used when no Replication transfer is done.
 	TransferCompleteReason = "TransferComplete"
+
+	// ExtractFailedReason is used when a Discovery.spec.extract projection
+	// fails to compile or evaluate.
+	ExtractFailedReason = "ExtractFailed"
+
+	// SelectorFailedReason is used when a Discovery.spec selector fails to
+	// compile or evaluate.
+	SelectorFailedReason = "SelectorFailed"
+
+	// PayloadTooLargeReason is used when the status payload exceeds the API
+	// server's request size limit and the controller had to drop it before
+	// persisting a diagnostic status update.
+	PayloadTooLargeReason = "PayloadTooLarge"
+
+	// NoReferencesMatchedReason is used on Ready=True when a Discovery's
+	// referenceSelector filtered every reference out, leaving the descriptor
+	// set empty.
+	NoReferencesMatchedReason = "NoReferencesMatched"
+
+	// NoComponentsMatchedReason is used on Ready=True when a Discovery's
+	// componentSelector filtered every remaining descriptor out.
+	NoComponentsMatchedReason = "NoComponentsMatched"
 )

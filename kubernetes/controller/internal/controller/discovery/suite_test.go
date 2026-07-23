@@ -138,8 +138,6 @@ var _ = BeforeSuite(func() {
 	Expect(pm.ResourcePluginRegistry.RegisterInternalResourcePlugin(ociResourceRepoPlugin)).To(Succeed())
 	Expect(pm.DigestProcessorRegistry.RegisterInternalDigestProcessorPlugin(ociResourceRepoPlugin)).To(Succeed())
 
-	// Setup resolver with worker pool
-
 	Expect((&Reconciler{
 		BaseReconciler: &ocm.BaseReconciler{
 			Client:        k8sManager.GetClient(),

@@ -2,6 +2,7 @@ package cel
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/google/cel-go/cel"
@@ -20,8 +21,16 @@ var sharedEnv = sync.OnceValues[*cel.Env, error](func() (*cel.Env, error) {
 		ext.Encoders(),
 		ext.Bindings(),
 		cel.OptionalTypes(),
+		ocmfunctions.SemverCheck(),
 	)
 })
+
+// SharedEnv returns the process-wide base CEL environment used by controllers
+// that do not need any extension bound to a particular ComponentInfo. Call
+// Extend on the result to declare variables specific to the caller.
+func SharedEnv() (*cel.Env, error) {
+	return sharedEnv()
+}
 
 // ComponentInfoEnv constructs a CEL environment with a v1alpha1.ComponentInfo as a dependency.
 // Extensions like `toOCI` need v1alpha1.ComponentInfo to properly provide an ImageReference from a localBlob.
@@ -41,4 +50,19 @@ func ComponentInfoEnv(component *v1alpha1.ComponentInfo) (*cel.Env, error) {
 	}
 
 	return ociEnv, nil
+}
+
+// IsMissingAttributeErr recognises CEL runtime errors caused by referencing a
+// map key / attribute / field that the activation doesn't carry. cel-go
+// surfaces these as unwrapped *types.Err values distinguishable only by their
+// message. Callers that want "missing evaluates to no-value rather than
+// raising" semantics use this to convert the error into a null / non-match.
+func IsMissingAttributeErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "no such key") ||
+		strings.Contains(msg, "no such attribute") ||
+		strings.Contains(msg, "no such field")
 }

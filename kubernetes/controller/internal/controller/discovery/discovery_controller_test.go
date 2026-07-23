@@ -10,6 +10,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -159,11 +160,10 @@ var _ = Describe("Discovery Controller", func() {
 			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
 
 			By("verifying the discovery status contains the expected component")
-			Expect(discoveryObj.Status.Discovery).NotTo(BeNil())
-			var result v2.Descriptor
-			Expect(json.Unmarshal(discoveryObj.Status.Discovery.Raw, &result)).To(Succeed())
-			Expect(result.Component.Name).To(Equal(componentName))
-			Expect(result.Component.Version).To(Equal(componentVersion))
+			result := parseDiscoveryResult(discoveryObj)
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].Component.Name).To(Equal(componentName))
+			Expect(result[0].Component.Version).To(Equal(componentVersion))
 		})
 
 		It("should discover nested components recursively", func(ctx SpecContext) {
@@ -373,7 +373,7 @@ var _ = Describe("Discovery Controller", func() {
 				test.DeleteObject(ctx, k8sClient, componentObj)
 			})
 
-			By("creating a discovery with discoveryFields")
+			By("creating a discovery with extract.byResources")
 			discoveryObj := &v1alpha1.Discovery{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      discoveryName,
@@ -381,9 +381,11 @@ var _ = Describe("Discovery Controller", func() {
 				},
 				Spec: v1alpha1.DiscoverySpec{
 					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
-					DiscoveryFields: map[string]string{
-						"imageRef": "resource.access.imageReference",
-						"type":     "resource.type",
+					Extract: &v1alpha1.Extract{
+						ByResources: map[string]string{
+							"imageRef": "resource.access.imageReference",
+							"type":     "resource.type",
+						},
 					},
 				},
 			}
@@ -407,97 +409,6 @@ var _ = Describe("Discovery Controller", func() {
 		})
 	})
 
-	Context("recursive field", func() {
-		var componentName, componentObjName, discoveryName string
-		var componentVersion string
-		repositoryName := "ocm.software/test-repository"
-
-		BeforeEach(func(ctx SpecContext) {
-			componentObjName = test.SanitizeNameForK8s(ctx.SpecReport().LeafNodeText)
-			componentName = "ocm.software/test-component-" + test.SanitizeNameForK8s(ctx.SpecReport().LeafNodeText)
-			discoveryName = "test-discovery-" + test.SanitizeNameForK8s(ctx.SpecReport().LeafNodeText)
-			componentVersion = "v1.0.0"
-
-			namespace := test.NamespaceForTest(ctx)
-			Expect(k8sClient.Create(ctx, namespace)).To(Succeed())
-
-			DeferCleanup(func(ctx SpecContext) {
-				discoveries := &v1alpha1.DiscoveryList{}
-				Expect(k8sClient.List(ctx, discoveries, client.InNamespace(namespace.GetName()))).To(Succeed())
-				Expect(discoveries.Items).To(BeEmpty())
-			})
-		})
-
-		It("should only return root component when recursive is 0", func(ctx SpecContext) {
-			By("creating a CTF with nested components")
-			nestedName := "ocm.software/nested-component"
-			ctfPath := filepath.Join(tempDir, "recursive-zero")
-			Expect(os.MkdirAll(ctfPath, 0o777)).To(Succeed())
-			_, specData := test.SetupCTFComponentVersionRepository(ctx, ctfPath, []*descruntime.Descriptor{
-				{
-					Component: descruntime.Component{
-						ComponentMeta: descruntime.ComponentMeta{
-							ObjectMeta: descruntime.ObjectMeta{Name: componentName, Version: componentVersion},
-						},
-						References: []descruntime.Reference{
-							{
-								ElementMeta: descruntime.ElementMeta{
-									ObjectMeta: descruntime.ObjectMeta{Name: "nested-ref", Version: componentVersion},
-								},
-								Component: nestedName,
-							},
-						},
-						Resources: []descruntime.Resource{
-							ociResource("root-resource", "1.0.0"),
-						},
-						Provider: descruntime.Provider{Name: "ocm.software"},
-					},
-				},
-				simpleComponent(nestedName, componentVersion, "nested-resource"),
-			})
-
-			By("mocking a ready component")
-			namespace := test.NamespaceForTest(ctx)
-			componentObj := test.MockComponent(ctx, componentObjName, namespace.GetName(), &test.MockComponentOptions{
-				Client:   k8sClient,
-				Recorder: recorder,
-				Info: v1alpha1.ComponentInfo{
-					Component:      componentName,
-					Version:        componentVersion,
-					RepositorySpec: &apiextensionsv1.JSON{Raw: specData},
-				},
-				Repository: repositoryName,
-			})
-			DeferCleanup(func(ctx SpecContext) {
-				test.DeleteObject(ctx, k8sClient, componentObj)
-			})
-
-			By("creating a discovery with recursive=0")
-			recursiveZero := int32(0)
-			discoveryObj := &v1alpha1.Discovery{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      discoveryName,
-					Namespace: namespace.GetName(),
-				},
-				Spec: v1alpha1.DiscoverySpec{
-					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
-					Recursive:    &recursiveZero,
-				},
-			}
-			Expect(k8sClient.Create(ctx, discoveryObj)).To(Succeed())
-			DeferCleanup(func(ctx SpecContext) {
-				test.DeleteObject(ctx, k8sClient, discoveryObj)
-			})
-
-			By("checking discovery becomes ready with only root component")
-			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
-
-			Expect(discoveryObj.Status.Discovery).NotTo(BeNil())
-			var result v2.Descriptor
-			Expect(json.Unmarshal(discoveryObj.Status.Discovery.Raw, &result)).To(Succeed())
-			Expect(result.Component.Name).To(Equal(componentName))
-		})
-	})
 
 	Context("selector combinations", func() {
 		var componentName, componentObjName, discoveryName string
@@ -597,10 +508,9 @@ var _ = Describe("Discovery Controller", func() {
 			return componentObj, specData
 		}
 
-		It("recursive 0 with reference selector should warn and resolve", func(ctx SpecContext) {
+		It("component selector matching nothing should return ready with an empty discovery array", func(ctx SpecContext) {
 			componentObj, _ := setupComponentTree(ctx)
 
-			recursiveZero := int32(0)
 			namespace := test.NamespaceForTest(ctx)
 			discoveryObj := &v1alpha1.Discovery{
 				ObjectMeta: metav1.ObjectMeta{
@@ -609,8 +519,67 @@ var _ = Describe("Discovery Controller", func() {
 				},
 				Spec: v1alpha1.DiscoverySpec{
 					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
-					Recursive:    &recursiveZero,
+					ComponentSelector: &v1alpha1.Selector{
+						MatchIdentity: map[string]string{"name": "non-existent-component"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, discoveryObj)).To(Succeed())
+			DeferCleanup(func(ctx SpecContext) {
+				test.DeleteObject(ctx, k8sClient, discoveryObj)
+			})
+
+			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
+
+			Expect(discoveryObj.Status.Discovery).NotTo(BeNil())
+			Expect(string(discoveryObj.Status.Discovery.Raw)).To(Equal("[]"))
+			readyCond := apimeta.FindStatusCondition(discoveryObj.GetConditions(), v1alpha1.ReadyCondition)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Reason).To(Equal(v1alpha1.NoComponentsMatchedReason))
+		})
+
+		It("reference selector matching nothing should return ready with NoReferencesMatched reason", func(ctx SpecContext) {
+			componentObj, _ := setupComponentTree(ctx)
+
+			namespace := test.NamespaceForTest(ctx)
+			discoveryObj := &v1alpha1.Discovery{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      discoveryName,
+					Namespace: namespace.GetName(),
+				},
+				Spec: v1alpha1.DiscoverySpec{
+					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
 					ReferenceSelector: &v1alpha1.Selector{
+						MatchIdentity: map[string]string{"componentName": "non-existent-reference"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, discoveryObj)).To(Succeed())
+			DeferCleanup(func(ctx SpecContext) {
+				test.DeleteObject(ctx, k8sClient, discoveryObj)
+			})
+
+			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
+
+			Expect(discoveryObj.Status.Discovery).NotTo(BeNil())
+			Expect(string(discoveryObj.Status.Discovery.Raw)).To(Equal("[]"))
+			readyCond := apimeta.FindStatusCondition(discoveryObj.GetConditions(), v1alpha1.ReadyCondition)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Reason).To(Equal(v1alpha1.NoReferencesMatchedReason))
+		})
+
+		It("component selector should show filtered descriptors", func(ctx SpecContext) {
+			componentObj, _ := setupComponentTree(ctx)
+
+			namespace := test.NamespaceForTest(ctx)
+			discoveryObj := &v1alpha1.Discovery{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      discoveryName,
+					Namespace: namespace.GetName(),
+				},
+				Spec: v1alpha1.DiscoverySpec{
+					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
+					ComponentSelector: &v1alpha1.Selector{
 						MatchIdentity: map[string]string{"name": nestedName1},
 					},
 				},
@@ -629,72 +598,7 @@ var _ = Describe("Discovery Controller", func() {
 			Expect(names).To(ContainElement(nestedName1))
 		})
 
-		It("nil recursive with reference selector should show filtered descriptors", func(ctx SpecContext) {
-			componentObj, _ := setupComponentTree(ctx)
-
-			namespace := test.NamespaceForTest(ctx)
-			discoveryObj := &v1alpha1.Discovery{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      discoveryName,
-					Namespace: namespace.GetName(),
-				},
-				Spec: v1alpha1.DiscoverySpec{
-					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
-					ReferenceSelector: &v1alpha1.Selector{
-						MatchIdentity: map[string]string{"name": nestedName1},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, discoveryObj)).To(Succeed())
-			DeferCleanup(func(ctx SpecContext) {
-				test.DeleteObject(ctx, k8sClient, discoveryObj)
-			})
-
-			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
-
-			result := parseDiscoveryResult(discoveryObj)
-			// Only the filtered reference (root excluded)
-			Expect(result).To(HaveLen(1))
-			names := extractComponentNames(result)
-			Expect(names).To(ContainElement(nestedName1))
-		})
-
-		It("recursive 0 with resource selector should show root with filtered resources", func(ctx SpecContext) {
-			componentObj, _ := setupComponentTree(ctx)
-
-			recursiveZero := int32(0)
-			namespace := test.NamespaceForTest(ctx)
-			discoveryObj := &v1alpha1.Discovery{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      discoveryName,
-					Namespace: namespace.GetName(),
-				},
-				Spec: v1alpha1.DiscoverySpec{
-					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
-					Recursive:    &recursiveZero,
-					ResourceSelector: &v1alpha1.Selector{
-						MatchExpressions: []v1alpha1.SelectorRequirement{
-							{Key: "name", Operator: v1alpha1.SelectorOpIn, Values: []string{"root-image"}},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, discoveryObj)).To(Succeed())
-			DeferCleanup(func(ctx SpecContext) {
-				test.DeleteObject(ctx, k8sClient, discoveryObj)
-			})
-
-			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
-
-			// Array with single root descriptor, resources filtered
-			result := parseDiscoveryResult(discoveryObj)
-			Expect(result).To(HaveLen(1))
-			Expect(result[0].Component.Name).To(Equal(componentName))
-			Expect(result[0].Component.Resources).To(HaveLen(1))
-			Expect(result[0].Component.Resources[0].Name).To(Equal("root-image"))
-		})
-
-		It("nil recursive with resource selector should show all components with filtered resources", func(ctx SpecContext) {
+		It("resource selector should show all components with filtered resources", func(ctx SpecContext) {
 			componentObj, _ := setupComponentTree(ctx)
 
 			namespace := test.NamespaceForTest(ctx)
@@ -706,9 +610,7 @@ var _ = Describe("Discovery Controller", func() {
 				Spec: v1alpha1.DiscoverySpec{
 					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
 					ResourceSelector: &v1alpha1.Selector{
-						MatchExpressions: []v1alpha1.SelectorRequirement{
-							{Key: "name", Operator: v1alpha1.SelectorOpIn, Values: []string{"image"}},
-						},
+						Expression: `identity.name == "image"`,
 					},
 				},
 			}
@@ -734,7 +636,7 @@ var _ = Describe("Discovery Controller", func() {
 			Expect(totalImageResources).To(Equal(2))
 		})
 
-		It("nil recursive with both selectors should show filtered components with filtered resources", func(ctx SpecContext) {
+		It("both selectors should show filtered components with filtered resources", func(ctx SpecContext) {
 			componentObj, _ := setupComponentTree(ctx)
 
 			namespace := test.NamespaceForTest(ctx)
@@ -745,13 +647,11 @@ var _ = Describe("Discovery Controller", func() {
 				},
 				Spec: v1alpha1.DiscoverySpec{
 					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
-					ReferenceSelector: &v1alpha1.Selector{
+					ComponentSelector: &v1alpha1.Selector{
 						MatchIdentity: map[string]string{"name": nestedName1},
 					},
 					ResourceSelector: &v1alpha1.Selector{
-						MatchExpressions: []v1alpha1.SelectorRequirement{
-							{Key: "name", Operator: v1alpha1.SelectorOpIn, Values: []string{"image"}},
-						},
+						Expression: `identity.name == "image"`,
 					},
 				},
 			}
@@ -762,7 +662,10 @@ var _ = Describe("Discovery Controller", func() {
 
 			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
 
-			// Only nested-1 (refSelector filters, root excluded)
+			// ReferenceSelector prunes ref-2 (unmatched) so nested2 is never
+			// fetched; ComponentSelector then keeps only nestedName1 (root
+			// has a different component name); ResourceSelector filters to
+			// resources named "image".
 			result := parseDiscoveryResult(discoveryObj)
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].Component.Name).To(Equal(nestedName1))
@@ -770,10 +673,9 @@ var _ = Describe("Discovery Controller", func() {
 			Expect(result[0].Component.Resources[0].Name).To(Equal("image"))
 		})
 
-		It("recursive 0 with both selectors should warn and show filtered components with filtered resources", func(ctx SpecContext) {
+		It("component selector should include the root when it matches", func(ctx SpecContext) {
 			componentObj, _ := setupComponentTree(ctx)
 
-			recursiveZero := int32(0)
 			namespace := test.NamespaceForTest(ctx)
 			discoveryObj := &v1alpha1.Discovery{
 				ObjectMeta: metav1.ObjectMeta{
@@ -782,13 +684,271 @@ var _ = Describe("Discovery Controller", func() {
 				},
 				Spec: v1alpha1.DiscoverySpec{
 					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
-					Recursive:    &recursiveZero,
-					ReferenceSelector: &v1alpha1.Selector{
-						MatchIdentity: map[string]string{"name": nestedName1},
+					ComponentSelector: &v1alpha1.Selector{
+						MatchIdentity: map[string]string{"name": componentName},
 					},
-					ResourceSelector: &v1alpha1.Selector{
-						MatchExpressions: []v1alpha1.SelectorRequirement{
-							{Key: "name", Operator: v1alpha1.SelectorOpIn, Values: []string{"chart"}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, discoveryObj)).To(Succeed())
+			DeferCleanup(func(ctx SpecContext) {
+				test.DeleteObject(ctx, k8sClient, discoveryObj)
+			})
+
+			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
+
+			result := parseDiscoveryResult(discoveryObj)
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].Component.Name).To(Equal(componentName))
+		})
+
+		It("reference selector by target componentName should filter to the matched subtree", func(ctx SpecContext) {
+			componentObj, _ := setupComponentTree(ctx)
+
+			namespace := test.NamespaceForTest(ctx)
+			discoveryObj := &v1alpha1.Discovery{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      discoveryName,
+					Namespace: namespace.GetName(),
+				},
+				Spec: v1alpha1.DiscoverySpec{
+					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
+					ReferenceSelector: &v1alpha1.Selector{
+						MatchIdentity: map[string]string{"componentName": nestedName1},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, discoveryObj)).To(Succeed())
+			DeferCleanup(func(ctx SpecContext) {
+				test.DeleteObject(ctx, k8sClient, discoveryObj)
+			})
+
+			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
+
+			// referenceSelector returns only the matched targets; root is not a
+			// reference target and is excluded.
+			result := parseDiscoveryResult(discoveryObj)
+			Expect(result).To(HaveLen(1))
+			Expect(extractComponentNames(result)).To(ConsistOf(nestedName1))
+		})
+
+		It("reference selector by local reference name should filter to the matched edge", func(ctx SpecContext) {
+			componentObj, _ := setupComponentTree(ctx)
+
+			namespace := test.NamespaceForTest(ctx)
+			discoveryObj := &v1alpha1.Discovery{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      discoveryName,
+					Namespace: namespace.GetName(),
+				},
+				Spec: v1alpha1.DiscoverySpec{
+					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
+					ReferenceSelector: &v1alpha1.Selector{
+						MatchIdentity: map[string]string{"name": "ref-1"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, discoveryObj)).To(Succeed())
+			DeferCleanup(func(ctx SpecContext) {
+				test.DeleteObject(ctx, k8sClient, discoveryObj)
+			})
+
+			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
+
+			result := parseDiscoveryResult(discoveryObj)
+			Expect(result).To(HaveLen(1))
+			Expect(extractComponentNames(result)).To(ConsistOf(nestedName1))
+		})
+
+		It("empty referenceSelector is treated as unset and keeps the root", func(ctx SpecContext) {
+			componentObj, _ := setupComponentTree(ctx)
+
+			namespace := test.NamespaceForTest(ctx)
+			discoveryObj := &v1alpha1.Discovery{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      discoveryName,
+					Namespace: namespace.GetName(),
+				},
+				Spec: v1alpha1.DiscoverySpec{
+					ComponentRef:      corev1.LocalObjectReference{Name: componentObj.GetName()},
+					ReferenceSelector: &v1alpha1.Selector{},
+				},
+			}
+			Expect(k8sClient.Create(ctx, discoveryObj)).To(Succeed())
+			DeferCleanup(func(ctx SpecContext) {
+				test.DeleteObject(ctx, k8sClient, discoveryObj)
+			})
+
+			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
+
+			// An empty selector carries no predicates, so the referenceSelector
+			// stage is skipped and the full graph (including the root) is
+			// returned. This matches the ADR contract.
+			result := parseDiscoveryResult(discoveryObj)
+			Expect(extractComponentNames(result)).To(ConsistOf(componentName, nestedName1, nestedName2))
+		})
+
+		It("reference selector prunes traversal of unmatched subtrees", func(ctx SpecContext) {
+			By("creating a CTF where one grandchild reference is intentionally missing")
+			ctfPath := filepath.Join(tempDir, test.SanitizeNameForK8s(ctx.SpecReport().LeafNodeText))
+			Expect(os.MkdirAll(ctfPath, 0o777)).To(Succeed())
+			missingName := "ocm.software/missing-" + test.SanitizeNameForK8s(ctx.SpecReport().LeafNodeText)
+			_, specData := test.SetupCTFComponentVersionRepository(ctx, ctfPath, []*descruntime.Descriptor{
+				{
+					Component: descruntime.Component{
+						ComponentMeta: descruntime.ComponentMeta{
+							ObjectMeta: descruntime.ObjectMeta{Name: componentName, Version: componentVersion},
+						},
+						References: []descruntime.Reference{
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{Name: "ref-good", Version: componentVersion},
+								},
+								Component: nestedName1,
+							},
+						},
+						Provider: descruntime.Provider{Name: "ocm.software"},
+					},
+				},
+				{
+					Component: descruntime.Component{
+						ComponentMeta: descruntime.ComponentMeta{
+							ObjectMeta: descruntime.ObjectMeta{Name: nestedName1, Version: componentVersion},
+						},
+						References: []descruntime.Reference{
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{Name: "ref-broken", Version: componentVersion},
+								},
+								Component: missingName,
+							},
+						},
+						Resources: []descruntime.Resource{
+							ociResource("image", "1.0.0"),
+						},
+						Provider: descruntime.Provider{Name: "ocm.software"},
+					},
+				},
+				// missingName is intentionally not added; resolving it would fail.
+			})
+
+			namespace := test.NamespaceForTest(ctx)
+			componentObj := test.MockComponent(ctx, componentObjName, namespace.GetName(), &test.MockComponentOptions{
+				Client:   k8sClient,
+				Recorder: recorder,
+				Info: v1alpha1.ComponentInfo{
+					Component:      componentName,
+					Version:        componentVersion,
+					RepositorySpec: &apiextensionsv1.JSON{Raw: specData},
+				},
+				Repository: repositoryName,
+			})
+			DeferCleanup(func(ctx SpecContext) {
+				test.DeleteObject(ctx, k8sClient, componentObj)
+			})
+
+			By("short-circuiting via a unique-target ReferenceSelector on nestedName1")
+			discoveryObj := &v1alpha1.Discovery{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      discoveryName,
+					Namespace: namespace.GetName(),
+				},
+				Spec: v1alpha1.DiscoverySpec{
+					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
+					ReferenceSelector: &v1alpha1.Selector{
+						MatchIdentity: map[string]string{
+							"componentName": nestedName1,
+							"version":       componentVersion,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, discoveryObj)).To(Succeed())
+			DeferCleanup(func(ctx SpecContext) {
+				test.DeleteObject(ctx, k8sClient, discoveryObj)
+			})
+
+			// If the short-circuit did not fire, the DAG would enumerate
+			// nestedName1's ref-broken and try to resolve missingName, causing
+			// reconcile to fail. Reaching Ready proves the target's subtree was
+			// never traversed.
+			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
+
+			result := parseDiscoveryResult(discoveryObj)
+			Expect(result).To(HaveLen(1))
+			Expect(extractComponentNames(result)).To(ConsistOf(nestedName1))
+		})
+
+		It("component selector short-circuits at a uniquely-identified target", func(ctx SpecContext) {
+			By("creating a CTF where one grandchild reference is intentionally missing")
+			ctfPath := filepath.Join(tempDir, test.SanitizeNameForK8s(ctx.SpecReport().LeafNodeText))
+			Expect(os.MkdirAll(ctfPath, 0o777)).To(Succeed())
+			missingName := "ocm.software/missing-" + test.SanitizeNameForK8s(ctx.SpecReport().LeafNodeText)
+			_, specData := test.SetupCTFComponentVersionRepository(ctx, ctfPath, []*descruntime.Descriptor{
+				{
+					Component: descruntime.Component{
+						ComponentMeta: descruntime.ComponentMeta{
+							ObjectMeta: descruntime.ObjectMeta{Name: componentName, Version: componentVersion},
+						},
+						References: []descruntime.Reference{
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{Name: "ref-good", Version: componentVersion},
+								},
+								Component: nestedName1,
+							},
+						},
+						Provider: descruntime.Provider{Name: "ocm.software"},
+					},
+				},
+				{
+					Component: descruntime.Component{
+						ComponentMeta: descruntime.ComponentMeta{
+							ObjectMeta: descruntime.ObjectMeta{Name: nestedName1, Version: componentVersion},
+						},
+						References: []descruntime.Reference{
+							{
+								ElementMeta: descruntime.ElementMeta{
+									ObjectMeta: descruntime.ObjectMeta{Name: "ref-broken", Version: componentVersion},
+								},
+								Component: missingName,
+							},
+						},
+						Resources: []descruntime.Resource{
+							ociResource("image", "1.0.0"),
+						},
+						Provider: descruntime.Provider{Name: "ocm.software"},
+					},
+				},
+				// missingName is intentionally not added; resolving it would fail.
+			})
+
+			namespace := test.NamespaceForTest(ctx)
+			componentObj := test.MockComponent(ctx, componentObjName, namespace.GetName(), &test.MockComponentOptions{
+				Client:   k8sClient,
+				Recorder: recorder,
+				Info: v1alpha1.ComponentInfo{
+					Component:      componentName,
+					Version:        componentVersion,
+					RepositorySpec: &apiextensionsv1.JSON{Raw: specData},
+				},
+				Repository: repositoryName,
+			})
+			DeferCleanup(func(ctx SpecContext) {
+				test.DeleteObject(ctx, k8sClient, componentObj)
+			})
+
+			By("short-circuiting via a unique-target ComponentSelector on nestedName1")
+			discoveryObj := &v1alpha1.Discovery{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      discoveryName,
+					Namespace: namespace.GetName(),
+				},
+				Spec: v1alpha1.DiscoverySpec{
+					ComponentRef: corev1.LocalObjectReference{Name: componentObj.GetName()},
+					ComponentSelector: &v1alpha1.Selector{
+						MatchIdentity: map[string]string{
+							"name":    nestedName1,
+							"version": componentVersion,
 						},
 					},
 				},
@@ -800,12 +960,11 @@ var _ = Describe("Discovery Controller", func() {
 
 			test.WaitForReadyObject(ctx, k8sClient, discoveryObj, map[string]any{})
 
-			// Only nested-1 (refSelector filters, root excluded)
+			// ComponentSelector filters root out (different name) and keeps only
+			// the short-circuit target.
 			result := parseDiscoveryResult(discoveryObj)
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].Component.Name).To(Equal(nestedName1))
-			Expect(result[0].Component.Resources).To(HaveLen(1))
-			Expect(result[0].Component.Resources[0].Name).To(Equal("chart"))
 		})
 	})
 

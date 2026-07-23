@@ -1,172 +1,132 @@
 package selector
 
 import (
+	"context"
 	"fmt"
-	"strings"
+	"sync"
 
-	"github.com/Masterminds/semver/v3"
+	"github.com/google/cel-go/cel"
 
 	"ocm.software/open-component-model/kubernetes/controller/api/v1alpha1"
+	ocmcel "ocm.software/open-component-model/kubernetes/controller/internal/cel"
 )
 
 // Matchable represents an element that can be matched against a Selector.
 type Matchable struct {
 	// Identity contains the element's identity attributes (name, version, extra identity).
 	Identity map[string]string
-	// Labels contains the element's label names mapped to their string values.
-	Labels map[string]string
+	// Labels holds the element's labels keyed by name. Values are the label's
+	// full JSON value (string, number, bool, object, array). MatchLabels only
+	// looks at entries whose value is a string; the Expression path sees all.
+	Labels map[string]any
 }
 
-// Matches evaluates whether the given element matches all requirements in the selector.
-// A nil selector matches everything.
-func Matches(s *v1alpha1.Selector, element Matchable) (bool, error) {
+// IsEmpty reports whether s has no predicates set (MatchIdentity, MatchLabels,
+// and Expression are all zero). A nil selector is empty. Discovery treats an
+// empty selector the same as an omitted field: the containing filter stage is
+// skipped entirely, so an empty referenceSelector does not drop the root.
+func IsEmpty(s *v1alpha1.Selector) bool {
+	return s == nil || (len(s.MatchIdentity) == 0 && len(s.MatchLabels) == 0 && s.Expression == "")
+}
+
+// Matches evaluates whether the given element matches all requirements in the
+// selector. MatchIdentity, MatchLabels, and Expression are ANDed. A nil
+// selector matches everything.
+func Matches(ctx context.Context, s *v1alpha1.Selector, element Matchable) (bool, error) {
 	if s == nil {
 		return true, nil
 	}
 
-	// MatchIdentity: each entry is equality on identity attributes (ANDed).
-	for key, value := range s.MatchIdentity {
-		if actual, exists := element.Identity[key]; !exists || actual != value {
+	for key, want := range s.MatchIdentity {
+		if got, exists := element.Identity[key]; !exists || got != want {
 			return false, nil
 		}
 	}
 
-	// MatchLabels: each entry is equality on element labels (ANDed).
-	for name, value := range s.MatchLabels {
-		if actual, exists := element.Labels[name]; !exists || actual != value {
+	for name, want := range s.MatchLabels {
+		got, ok := element.Labels[name].(string)
+		if !ok || got != want {
 			return false, nil
 		}
 	}
 
-	// MatchExpressions: each requirement is ANDed.
-	for _, req := range s.MatchExpressions {
-		match, err := matchRequirement(req, element)
-		if err != nil {
-			return false, err
-		}
-		if !match {
-			return false, nil
-		}
+	if s.Expression != "" {
+		return evalExpression(ctx, s.Expression, element)
 	}
 
 	return true, nil
 }
 
-func matchRequirement(r v1alpha1.SelectorRequirement, element Matchable) (bool, error) {
-	if r.Key == "labels" {
-		return matchLabels(r, element.Labels)
-	}
-	return matchIdentity(r, element.Identity)
+// selectorEnv is the CEL environment used to compile Selector.Expression
+// programs. It extends the shared env with the two variables Matchable exposes.
+var (
+	selectorEnvOnce sync.Once
+	selectorEnv     *cel.Env
+	selectorEnvErr  error
+)
+
+func env() (*cel.Env, error) {
+	selectorEnvOnce.Do(func() {
+		base, err := ocmcel.SharedEnv()
+		if err != nil {
+			selectorEnvErr = err
+			return
+		}
+		selectorEnv, selectorEnvErr = base.Extend(
+			cel.Variable("identity", cel.MapType(cel.StringType, cel.StringType)),
+			cel.Variable("labels", cel.MapType(cel.StringType, cel.DynType)),
+		)
+	})
+	return selectorEnv, selectorEnvErr
 }
 
-func matchIdentity(r v1alpha1.SelectorRequirement, identity map[string]string) (bool, error) {
-	value, exists := identity[r.Key]
+// programCache memoizes compiled CEL programs keyed by expression text. It is
+// process-wide because Selector.Expression is typically stable across
+// reconciles for a given Selector and reconciles a lot of elements.
+var programCache sync.Map // map[string]cel.Program
 
-	switch r.Operator {
-	case v1alpha1.SelectorOpIn:
-		if !exists {
+func getProgram(expr string) (cel.Program, error) {
+	if p, ok := programCache.Load(expr); ok {
+		return p.(cel.Program), nil
+	}
+	e, err := env()
+	if err != nil {
+		return nil, fmt.Errorf("cel env: %w", err)
+	}
+	ast, issues := e.Compile(expr)
+	if issues != nil && issues.Err() != nil {
+		return nil, fmt.Errorf("compile expression: %w", issues.Err())
+	}
+	prog, err := e.Program(ast)
+	if err != nil {
+		return nil, fmt.Errorf("build program: %w", err)
+	}
+	// Store: last writer wins; identical expressions produce equivalent programs.
+	actual, _ := programCache.LoadOrStore(expr, prog)
+	return actual.(cel.Program), nil
+}
+
+func evalExpression(ctx context.Context, expr string, e Matchable) (bool, error) {
+	prog, err := getProgram(expr)
+	if err != nil {
+		return false, err
+	}
+	val, _, err := prog.ContextEval(ctx, map[string]any{
+		"identity": e.Identity,
+		"labels":   e.Labels,
+	})
+	if err != nil {
+		if ocmcel.IsMissingAttributeErr(err) {
+			// An expression that references an attribute the element doesn't
+			// carry evaluates to "no match" rather than surfacing an error.
+			// Users who want strictness can use has(identity.foo) explicitly.
 			return false, nil
 		}
-		for _, v := range r.Values {
-			if v == value {
-				return true, nil
-			}
-		}
-		return false, nil
-
-	case v1alpha1.SelectorOpNotIn:
-		if !exists {
-			return true, nil
-		}
-		for _, v := range r.Values {
-			if v == value {
-				return false, nil
-			}
-		}
-		return true, nil
-
-	case v1alpha1.SelectorOpExists:
-		return exists, nil
-
-	case v1alpha1.SelectorOpDoesNotExist:
-		return !exists, nil
-
-	case v1alpha1.SelectorOpSemverRange:
-		if !exists {
-			return false, nil
-		}
-		if len(r.Values) != 1 {
-			return false, fmt.Errorf("SemverRange operator requires exactly one value, got %d", len(r.Values))
-		}
-		constraint, err := semver.NewConstraint(r.Values[0])
-		if err != nil {
-			return false, fmt.Errorf("invalid semver constraint %q: %w", r.Values[0], err)
-		}
-		v, err := semver.NewVersion(value)
-		if err != nil {
-			return false, fmt.Errorf("invalid semver version %q: %w", value, err)
-		}
-		return constraint.Check(v), nil
-
-	default:
-		return false, fmt.Errorf("unknown operator %q", r.Operator)
+		return false, fmt.Errorf("evaluate expression: %w", err)
 	}
-}
-
-func matchLabels(r v1alpha1.SelectorRequirement, labels map[string]string) (bool, error) {
-	switch r.Operator {
-	case v1alpha1.SelectorOpExists:
-		for _, name := range r.Values {
-			if _, exists := labels[name]; !exists {
-				return false, nil
-			}
-		}
-		return true, nil
-
-	case v1alpha1.SelectorOpDoesNotExist:
-		for _, name := range r.Values {
-			if _, exists := labels[name]; exists {
-				return false, nil
-			}
-		}
-		return true, nil
-
-	case v1alpha1.SelectorOpIn:
-		for _, entry := range r.Values {
-			name, val, ok := parseLabelEntry(entry)
-			if !ok {
-				return false, fmt.Errorf("invalid label entry %q: expected format \"name=value\"", entry)
-			}
-			if labelVal, exists := labels[name]; exists && labelVal == val {
-				return true, nil
-			}
-		}
-		return false, nil
-
-	case v1alpha1.SelectorOpNotIn:
-		for _, entry := range r.Values {
-			name, val, ok := parseLabelEntry(entry)
-			if !ok {
-				return false, fmt.Errorf("invalid label entry %q: expected format \"name=value\"", entry)
-			}
-			if labelVal, exists := labels[name]; exists && labelVal == val {
-				return false, nil
-			}
-		}
-		return true, nil
-
-	case v1alpha1.SelectorOpSemverRange:
-		return false, fmt.Errorf("SemverRange operator is not supported for labels")
-
-	default:
-		return false, fmt.Errorf("unknown operator %q", r.Operator)
+	b, ok := val.Value().(bool)
+	if !ok {
+		return false, fmt.Errorf("expression must return bool, got %T", val.Value())
 	}
-}
-
-func parseLabelEntry(entry string) (name, value string, ok bool) {
-	parts := strings.SplitN(entry, "=", 2)
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
+	return b, nil
 }

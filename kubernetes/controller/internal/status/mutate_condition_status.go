@@ -42,11 +42,18 @@ func MarkAsStalled(recorder kuberecorder.EventRecorder, obj IdentifiableClientOb
 
 // MarkReady sets the condition status of an Object to `Ready`.
 func MarkReady(recorder kuberecorder.EventRecorder, obj IdentifiableClientObject, msg string, messageArgs ...any) {
+	MarkReadyWithReason(recorder, obj, v1alpha1.SucceededReason, msg, messageArgs...)
+}
+
+// MarkReadyWithReason sets the condition status of an Object to `Ready` with a
+// caller-supplied reason. Use for successful outcomes that still deserve a
+// distinct machine-readable label (e.g. "query ran, result is empty").
+func MarkReadyWithReason(recorder kuberecorder.EventRecorder, obj IdentifiableClientObject, reason string, msg string, messageArgs ...any) {
 	RemoveCondition(obj, v1alpha1.ReconcilingCondition)
 	SetCondition(obj, metav1.Condition{
 		Type:    v1alpha1.ReadyCondition,
 		Status:  metav1.ConditionTrue,
-		Reason:  v1alpha1.SucceededReason,
+		Reason:  reason,
 		Message: fmt.Sprintf(msg, messageArgs...),
 	})
 	event.New(recorder, obj, nil, v1alpha1.EventSeverityInfo, msg, messageArgs...)
