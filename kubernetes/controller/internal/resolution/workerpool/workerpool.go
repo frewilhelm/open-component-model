@@ -15,14 +15,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	genericv1 "ocm.software/open-component-model/bindings/go/configuration/generic/v1/spec"
+	"ocm.software/open-component-model/bindings/go/credentials"
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
+	gpgcredentialsv1alpha1 "ocm.software/open-component-model/bindings/go/gpg/spec/credentials/v1alpha1"
+	gpgsigningv1alpha1 "ocm.software/open-component-model/bindings/go/gpg/spec/signing/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/plugin/manager/registries/signinghandler"
 	"ocm.software/open-component-model/bindings/go/repository"
 	signingv1alpha1 "ocm.software/open-component-model/bindings/go/rsa/signing/v1alpha1"
 	rsacredentialsv1 "ocm.software/open-component-model/bindings/go/rsa/spec/credentials/v1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	"ocm.software/open-component-model/bindings/go/signing"
+	signingspec "ocm.software/open-component-model/bindings/go/signing/v1alpha1/spec"
+	sigstoresigningv1alpha1 "ocm.software/open-component-model/bindings/go/sigstore/signing/v1alpha1"
+	trustedrootv1alpha1 "ocm.software/open-component-model/bindings/go/sigstore/spec/credentials/trustedroot/v1alpha1"
 	"ocm.software/open-component-model/kubernetes/controller/internal/verification"
 )
 
@@ -68,6 +75,14 @@ type ResolveOptions struct {
 	// Digest is used to verify the integrity of a referenced component version and is used as part of the cache key.
 	Digest          *v2.Digest
 	SigningRegistry *signinghandler.SigningRegistry
+	// SigningConfig is the raw ocm signing config (signing.config.ocm.software) carried by the effective ocm
+	// configuration. verifySignatures uses it to look up advisory verifiers for signatures present on the component
+	// version but not listed in Verifications. Nil means no advisory verification runs.
+	SigningConfig *genericv1.Config
+	// CredentialGraph resolves typed credentials from the ocm credentials config. When a Verification
+	// carries no inline key material the signature verifier's consumer identity is resolved through
+	// this graph. Optional; nil means "no credential graph, use inline material or handler defaults".
+	CredentialGraph credentials.Resolver
 	KeyFunc         func() (string, error)
 	// Requester is the information about the object requesting this resolution.
 	// It will be notified when the resolution completes.
@@ -435,7 +450,7 @@ func (wp *WorkerPool) getComponentVersion(ctx context.Context, opts ResolveOptio
 			return nil, fmt.Errorf("signing registry is required when verifications are configured")
 		}
 
-		return verifySignatures(ctx, desc, opts.Verifications, opts.SigningRegistry)
+		return verifySignatures(ctx, desc, opts.Verifications, opts.SigningConfig, opts.CredentialGraph, opts.SigningRegistry)
 	default:
 		logger.Info("no digest or verifications provided, skipping integrity and signature verification",
 			"component", opts.Component, "version", opts.Version)
@@ -443,17 +458,28 @@ func (wp *WorkerPool) getComponentVersion(ctx context.Context, opts ResolveOptio
 	}
 }
 
-// verifySignatures performs signature verification for the provided component version descriptor and the list of
-// verifications.
-func verifySignatures(ctx context.Context, desc *descriptor.Descriptor, verifications []verification.Verification, signingRegistry *signinghandler.SigningRegistry) (*descriptor.Descriptor, error) {
+// verifySignatures runs signature verification in two passes.
+//
+// Pass 1 (enforcing): every entry in verifications is verified against the matching signature on the component
+// version. A missing signature or a failed verification is a terminal error and blocks the resolution.
+//
+// Pass 2 (advisory): every signature on the component version that pass 1 did not already handle is looked up in the
+// ocm signing config (signing.config.ocm.software). If an entry with a Verifier applies (per-signature or global),
+// its handler is invoked. Failures are logged at Error level and swallowed: advisory verifiers exist to surface trust
+// data configured via ocmconfig without turning every unrelated component into a Ready=false. Advisory verification is
+// observability, not a security control - only entries in Component.spec.verify gate the deployment.
+//
+// Credential resolution order per signature:
+//  1. Inline key material on the Verification (SecretRef / Value) - always wins when present.
+//  2. Credentials returned by credGraph for the handler's consumer identity - used when no inline
+//     material is configured and a credential graph is available.
+//  3. Nil - passed through to the handler, which either accepts defaults (public-good Sigstore) or
+//     fails with its own "missing credentials" error (RSA / GPG).
+func verifySignatures(ctx context.Context, desc *descriptor.Descriptor, verifications []verification.Verification, signingConfig *genericv1.Config, credGraph credentials.Resolver, signingRegistry *signinghandler.SigningRegistry) (*descriptor.Descriptor, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("verifying signature", "component", desc.Component.Name, "version", desc.Component.Version)
 
-	signingHandler, err := signingRegistry.GetPlugin(ctx, &signingv1alpha1.Config{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get signing handler plugin: %w", err)
-	}
-
+	enforced := make(map[string]struct{}, len(verifications))
 	for _, v := range verifications {
 		var descSig *descriptor.Signature
 		for i := range desc.Signatures {
@@ -466,30 +492,159 @@ func verifySignatures(ctx context.Context, desc *descriptor.Descriptor, verifica
 		if descSig == nil {
 			return nil, fmt.Errorf("signature %s not found in component %s", v.Signature, desc.Component.Name)
 		}
+		enforced[descSig.Name] = struct{}{}
 
 		if err := signing.VerifyDigestMatchesDescriptor(ctx, desc, *descSig, slog.New(logr.ToSlogHandler(logger))); err != nil {
 			return nil, fmt.Errorf("digest verification failed for signature %q: %w", descSig.Name, err)
 		}
 
-		// TODO: We need to derive the expected credential key from the signature algorithm. This does not look that
-		//       reliable currently. This will probably change, when typed credentials are supported.
-		var credentials runtime.Typed
-		switch signingv1alpha1.SignatureAlgorithm(descSig.Signature.Algorithm) {
-		case signingv1alpha1.AlgorithmRSASSAPSS, signingv1alpha1.AlgorithmRSASSAPKCS1V15:
-			credentials = &rsacredentialsv1.RSACredentials{
-				Type:         rsacredentialsv1.VersionedType,
-				PublicKeyPEM: string(v.PublicKey),
-			}
-		default:
-			return nil, fmt.Errorf("unsupported signature algorithm: %q", descSig.Signature.Algorithm)
+		var verifierSpec runtime.Typed
+		if v.VerifierSpec != nil {
+			verifierSpec = v.VerifierSpec
+		} else {
+			verifierSpec = &signingv1alpha1.Config{}
 		}
 
-		if err := signingHandler.Verify(ctx, *descSig, &signingv1alpha1.Config{}, credentials); err != nil {
+		signingHandler, err := signingRegistry.GetPlugin(ctx, verifierSpec)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get signing handler plugin for verifier %q: %w", verifierSpec.GetType(), err)
+		}
+
+		creds, err := resolveVerifierCredentials(ctx, signingHandler, verifierSpec, *descSig, v.PublicKey, credGraph, logger)
+		if err != nil {
+			return nil, fmt.Errorf("could not resolve credentials for signature %q: %w", descSig.Name, err)
+		}
+
+		if err := signingHandler.Verify(ctx, *descSig, verifierSpec, creds); err != nil {
 			return nil, fmt.Errorf("signature verification failed for signature %s: %w", v.Signature, err)
 		}
+
+		logger.Info("verified signature", "component", desc.Component.Name, "version", desc.Component.Version, "signature", v.Signature)
+	}
+
+	if signingConfig == nil {
+		return desc, nil
+	}
+
+	for i := range desc.Signatures {
+		descSig := &desc.Signatures[i]
+		if _, done := enforced[descSig.Name]; done {
+			continue
+		}
+		cfg, err := signingspec.LookupConfigForSignature(signingConfig, descSig.Name)
+		if err != nil {
+			logger.Error(err, "advisory signature verification skipped: failed to look up signing config",
+				"signature", descSig.Name, "component", desc.Component.Name)
+			continue
+		}
+		if cfg == nil || cfg.Verifier == nil {
+			continue
+		}
+		if err := runAdvisoryVerification(ctx, desc, *descSig, cfg.Verifier, credGraph, signingRegistry, logger); err != nil {
+			logger.Error(err, "advisory signature verification failed; verifier sourced from ocmconfig, not enforced",
+				"signature", descSig.Name, "component", desc.Component.Name, "verifier", cfg.Verifier.GetType())
+		}
+
+		logger.Info("verified advisory signature", "component", desc.Component.Name, "version", desc.Component.Version, "signature", descSig.Name)
 	}
 
 	return desc, nil
+}
+
+// runAdvisoryVerification runs a single advisory signature verification. Errors are returned so the caller can log them
+// with structured fields; the caller must not propagate them as reconcile failures.
+func runAdvisoryVerification(ctx context.Context, desc *descriptor.Descriptor, descSig descriptor.Signature, verifierSpec runtime.Typed, credGraph credentials.Resolver, signingRegistry *signinghandler.SigningRegistry, logger logr.Logger) error {
+	if err := signing.VerifyDigestMatchesDescriptor(ctx, desc, descSig, slog.New(logr.ToSlogHandler(logger))); err != nil {
+		return fmt.Errorf("digest verification failed: %w", err)
+	}
+	handler, err := signingRegistry.GetPlugin(ctx, verifierSpec)
+	if err != nil {
+		return fmt.Errorf("failed to get signing handler plugin for verifier %q: %w", verifierSpec.GetType(), err)
+	}
+	creds, err := resolveVerifierCredentials(ctx, handler, verifierSpec, descSig, nil, credGraph, logger)
+	if err != nil {
+		return fmt.Errorf("could not resolve credentials: %w", err)
+	}
+	return handler.Verify(ctx, descSig, verifierSpec, creds)
+}
+
+// resolveVerifierCredentials picks the credential material handed to the signing handler for a single signature. It
+// prefers inline material declared on the Verification CR, falling back to the ocm credential graph when the handler
+// exposes a consumer identity, and finally to nil (the handler decides).
+func resolveVerifierCredentials(
+	ctx context.Context,
+	handler signing.Handler,
+	verifierSpec runtime.Typed,
+	sig descriptor.Signature,
+	inlineKey []byte,
+	credGraph credentials.Resolver,
+	logger logr.Logger,
+) (runtime.Typed, error) {
+	if len(inlineKey) > 0 {
+		return credentialsForVerifier(verifierSpec.GetType(), inlineKey)
+	}
+
+	if credGraph == nil {
+		return nil, nil
+	}
+
+	consumerID, err := handler.GetVerifyingCredentialConsumerIdentity(ctx, sig, verifierSpec)
+	if err != nil {
+		// The handler is unable to describe an identity for this signature. Fall back to nil credentials
+		// and let it use its defaults or fail with its own error.
+		logger.V(1).Info("handler could not derive verifying credential consumer identity",
+			"signature", sig.Name, "error", err.Error())
+		return nil, nil
+	}
+
+	resolved, err := credGraph.Resolve(ctx, consumerID)
+	if err != nil {
+		if errors.Is(err, credentials.ErrNotFound) {
+			logger.V(1).Info("no credentials found in credential graph for signature verification",
+				"signature", sig.Name, "identity", consumerID)
+			return nil, nil
+		}
+		return nil, fmt.Errorf("credential graph lookup failed: %w", err)
+	}
+	return resolved, nil
+}
+
+// credentialsForVerifier wraps the raw key material carried on the Verification CR into the typed credential expected
+// by the resolved signing handler. The v1alpha1 Component API exposes a single opaque blob per signature, so the
+// meaning of that blob is derived from the verifier config type:
+//
+//   - RSASigningConfiguration            -> PEM public key / certificate chain (required)
+//   - GPGSigningConfiguration            -> ASCII-armored OpenPGP public key   (required)
+//   - SigstoreVerificationConfiguration  -> optional trusted-root JSON, only
+//     needed for privateInfrastructure: true; empty means "use the default
+//     public-good Sigstore TUF root".
+//
+// A nil return is the explicit signal "no material was configured". Handlers that require material (RSA, GPG) will
+// surface a descriptive error on Verify; handlers that tolerate absence (public-good Sigstore) will proceed with
+// their defaults.
+func credentialsForVerifier(verifierType runtime.Type, publicKey []byte) (runtime.Typed, error) {
+	if len(publicKey) == 0 {
+		return nil, nil
+	}
+	switch verifierType.Name {
+	case signingv1alpha1.ConfigType:
+		return &rsacredentialsv1.RSACredentials{
+			Type:         rsacredentialsv1.VersionedType,
+			PublicKeyPEM: string(publicKey),
+		}, nil
+	case gpgsigningv1alpha1.ConfigType:
+		return &gpgcredentialsv1alpha1.GPGCredentials{
+			Type:         runtime.NewVersionedType(gpgcredentialsv1alpha1.GPGCredentialsType, gpgcredentialsv1alpha1.Version),
+			PublicKeyPGP: string(publicKey),
+		}, nil
+	case sigstoresigningv1alpha1.VerifyConfigType:
+		return &trustedrootv1alpha1.TrustedRoot{
+			Type:            trustedrootv1alpha1.VersionedType,
+			TrustedRootJSON: string(publicKey),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported verifier configuration type %q", verifierType)
+	}
 }
 
 // compareDigest performs integrity verification using the provided digest against a fresh calculated digest of

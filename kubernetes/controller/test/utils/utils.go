@@ -20,6 +20,10 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
 	ocistore "oras.land/oras-go/v2/content/oci"
+	"sigs.k8s.io/yaml"
+
+	genericv1 "ocm.software/open-component-model/bindings/go/configuration/generic/v1/spec"
+	signingspec "ocm.software/open-component-model/bindings/go/signing/v1alpha1/spec"
 )
 
 const (
@@ -128,7 +132,7 @@ func WaitForResource(ctx context.Context, condition, timeout string, resource ..
 
 // PrepareOCMComponent creates an OCM component from a component-constructor file.
 // After creating the OCM component, the component is transferred to imageRegistry.
-func PrepareOCMComponent(ctx context.Context, name, componentConstructorPath, imageRegistry, signingKey string) error {
+func PrepareOCMComponent(ctx context.Context, name, componentConstructorPath, imageRegistry string) error {
 	ocm := OCMBinary()
 
 	By("creating ocm component for " + name)
@@ -157,23 +161,43 @@ func PrepareOCMComponent(ctx context.Context, name, componentConstructorPath, im
 	componentName := componentNamePrefix + filepath.Base(filepath.Dir(componentConstructorPath))
 	transferRef := fmt.Sprintf("ctf::%s//%s", ctfDir, componentName)
 
-	if signingKey != "" {
-		By("signing ocm component for " + name)
-		ocmConfigPath := filepath.Join(tmpDir, ".ocmconfig")
-		if err := writeSigningConfig(ocmConfigPath, signingKey, signingKey+".pub"); err != nil {
-			return fmt.Errorf("could not write signing ocmconfig: %w", err)
+	// If the example ships its own .ocmconfig, use it to sign all configured
+	// signatures. The config carries signer specs and inline credentials for
+	// every algorithm in the example (RSA, GPG, ...).
+	ocmConfigPath := filepath.Join(exampleDir, ".ocmconfig")
+	if _, err := os.Stat(ocmConfigPath); err == nil {
+		sigNames, err := signingConfigSignatureNames(ocmConfigPath)
+		if err != nil {
+			return fmt.Errorf("could not read signature names from .ocmconfig: %w", err)
+		}
+		for _, sigName := range sigNames {
+			By(fmt.Sprintf("signing ocm component for %s with signature %q", name, sigName))
+			signRef := fmt.Sprintf("ctf::%s//%s:%s", ctfDir, componentName, signingVersion)
+			cmd = exec.CommandContext(ctx, ocm,
+				"sign", "cv",
+				signRef,
+				"--signature", sigName,
+				"--config", ocmConfigPath,
+			)
+			cmd.Dir = exampleDir
+			if _, err := Run(cmd); err != nil {
+				return fmt.Errorf("could not sign ocm component with signature %q: %w", sigName, err)
+			}
 		}
 
-		signRef := fmt.Sprintf("ctf::%s//%s:%s", ctfDir, componentName, signingVersion)
-		cmd = exec.CommandContext(ctx, ocm,
-			"sign", "cv",
-			signRef,
-			"--signature", "ocm.software",
-			"--config", ocmConfigPath,
+		By("creating k8s Secret " + name + "-ocmconfig from .ocmconfig")
+		secretName := name + "-ocmconfig"
+		cmd = exec.CommandContext(ctx, "kubectl", "create", "secret", "generic", secretName,
+			"--namespace", "default",
+			"--from-file=.ocmconfig="+ocmConfigPath,
 		)
 		if _, err := Run(cmd); err != nil {
-			return fmt.Errorf("could not sign ocm component: %w", err)
+			return fmt.Errorf("could not create ocmconfig secret: %w", err)
 		}
+		DeferCleanup(func() {
+			_, _ = Run(exec.Command("kubectl", "delete", "secret", secretName,
+				"--namespace", "default", "--ignore-not-found"))
+		})
 	}
 
 	By("transferring ocm component for " + name)
@@ -378,4 +402,36 @@ func GetResourceField(ctx context.Context, resource, fieldSelector string) (stri
 
 	result := strings.Trim(strings.TrimSpace(string(output)), "'")
 	return result, nil
+}
+
+// signingConfigSignatureNames loads the .ocmconfig at path and returns the
+// deduplicated list of signature names found across all
+// signing.config.ocm.software entries that carry a non-empty "signature"
+// field. Global entries (no signature field) are skipped — the CLI requires
+// an explicit --signature name per invocation.
+func signingConfigSignatureNames(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cfg genericv1.Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse ocmconfig: %w", err)
+	}
+	entries, err := genericv1.FilterForType[*signingspec.Config](signingspec.Scheme, &cfg)
+	if err != nil {
+		return nil, fmt.Errorf("filter signing configs: %w", err)
+	}
+	seen := make(map[string]struct{})
+	var names []string
+	for _, e := range entries {
+		if e.Signature == "" {
+			continue
+		}
+		if _, dup := seen[e.Signature]; !dup {
+			seen[e.Signature] = struct{}{}
+			names = append(names, e.Signature)
+		}
+	}
+	return names, nil
 }

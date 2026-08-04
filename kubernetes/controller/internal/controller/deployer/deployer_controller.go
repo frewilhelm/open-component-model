@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"ocm.software/open-component-model/bindings/go/blob"
+	genericv1 "ocm.software/open-component-model/bindings/go/configuration/generic/v1/spec"
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/plugin/manager"
@@ -965,7 +966,11 @@ func (r *Reconciler) getEffectiveComponentDescriptor(
 
 	// Add verifications from the component to the cache-backed repository to make sure they are included in the
 	// cache key and used for verification (if any).
-	verifications, err := verification.GetVerifications(ctx, r.Client, component)
+	var signingConfig *genericv1.Config
+	if cfg != nil {
+		signingConfig = cfg.Config
+	}
+	verifications, err := verification.GetVerifications(ctx, r.Client, signingConfig, component)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get verifications: %w", err)
 	}

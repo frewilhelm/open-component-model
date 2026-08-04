@@ -8,6 +8,7 @@ import (
 	"k8s.io/utils/lru"
 
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
+	"ocm.software/open-component-model/bindings/go/credentials"
 	ocirepository "ocm.software/open-component-model/bindings/go/oci/spec/repository"
 	"ocm.software/open-component-model/bindings/go/plugin/manager"
 	"ocm.software/open-component-model/bindings/go/plugin/manager/registries/signinghandler"
@@ -86,11 +87,24 @@ func (r *Resolver) NewCacheBackedRepository(ctx context.Context, opts *Repositor
 	if err != nil {
 		return nil, fmt.Errorf("failed to build repository cache key: %w", err)
 	}
+	var credGraph credentials.Resolver
+	if cfg != nil {
+		var err error
+		credGraph, err = setup.NewCredentialGraph(ctx, cfg.Config, setup.CredentialGraphOptions{
+			PluginManager: r.pluginManager,
+			Logger:        r.logger,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create credential graph: %w", err)
+		}
+		r.logger.V(1).Info("resolved credential graph")
+	}
+
 	var provider resolvers.ComponentVersionRepositoryResolver
 	if cached, ok := r.repoCache.Get(cacheKey); ok {
 		provider = cached.(resolvers.ComponentVersionRepositoryResolver)
 	} else {
-		provider, err = r.createResolver(ctx, opts.RepositorySpec, cfg)
+		provider, err = r.createResolver(ctx, opts.RepositorySpec, cfg, credGraph)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create provider: %w", err)
 		}
@@ -107,12 +121,13 @@ func (r *Resolver) NewCacheBackedRepository(ctx context.Context, opts *Repositor
 		verifications:   opts.Verifications,
 		digest:          opts.Digest,
 		signingRegistry: opts.SigningRegistry,
+		credentialGraph: credGraph,
 	}, nil
 }
 
 // createResolver creates a resolver based on the configuration.
 // The resolver handles resolving the appropriate repository for each component.
-func (r *Resolver) createResolver(ctx context.Context, spec runtime.Typed, cfg *configuration.Configuration) (resolvers.ComponentVersionRepositoryResolver, error) {
+func (r *Resolver) createResolver(ctx context.Context, spec runtime.Typed, cfg *configuration.Configuration, credGraph credentials.Resolver) (resolvers.ComponentVersionRepositoryResolver, error) {
 	if spec == nil {
 		return nil, fmt.Errorf("repository spec is required")
 	}
@@ -122,14 +137,6 @@ func (r *Resolver) createResolver(ctx context.Context, spec runtime.Typed, cfg *
 	}
 
 	if cfg != nil {
-		credGraph, err := setup.NewCredentialGraph(ctx, cfg.Config, setup.CredentialGraphOptions{
-			PluginManager: r.pluginManager,
-			Logger:        r.logger,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create credential graph: %w", err)
-		}
-		r.logger.V(1).Info("resolved credential graph")
 		opts.CredentialGraph = credGraph
 
 		fallbackResolvers, pathMatchers, err := resolvers.ExtractResolvers(cfg.Config, ocirepository.Scheme)

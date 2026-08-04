@@ -20,8 +20,6 @@ const (
 	Rgd                  = "rgd.yaml"
 	Instance             = "instance.yaml"
 	K8sManifest          = "k8s-manifest.yaml"
-	PublicKey            = "ocm.software.pub"
-	PrivateKey           = "ocm.software"
 )
 
 // ignoreExamples lists examples that are tested elsewhere or should be skipped.
@@ -72,17 +70,11 @@ var _ = Describe("controller", func() {
 				Expect(files).To(ContainElements(reqFiles), "required files %s not found in example directory %q", reqFiles, example.Name())
 
 				By("creating and transferring a component version for " + example.Name())
-				// If directory contains a private key, the component version must signed.
-				signingKey := ""
-				if slices.Contains(files, PrivateKey) {
-					signingKey = filepath.Join(examplesDir, example.Name(), PrivateKey)
-				}
 				Expect(utils.PrepareOCMComponent(
 					ctx,
 					example.Name(),
 					filepath.Join(examplesDir, example.Name(), ComponentConstructor),
 					imageRegistry,
-					signingKey,
 				)).To(Succeed())
 
 				By("bootstrapping the example")

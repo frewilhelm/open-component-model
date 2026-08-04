@@ -1,7 +1,11 @@
 secret:
   ignored_matches:
-  - match: 4132766f296d24c64452646571d72a1f88e66b72f27838c6749b071b0468939d
-    name: kubernetes/controller/examples public keys
+  - match: 2129f451033ed559f88f1c7a6d2c240902de55fd457a9daf0ade25cfca2df7b3
+    name: kubernetes/controller/examples helm-signing ocmconfig keys
+  - match: eeb6db2d2ad62d8d0b8a27df2fd5cfd11709fe28bfe7b335e1e26de282d47ef9
+    name: kubernetes/controller/examples helm-signing ocmconfig pgp passphrase
+  - match: 366ddfde3283e98320dd4557e47b125c28e1d0a44866e84319cc91bd10dcfdae
+    name: kubernetes/controller/examples helm-nested-signed ocmconfig keys
   - match: c41c71837a9ffbb3eb165eb1fb62ebed35c129c9597ee17460a831a66a372422
     name: cli/cmd/cmd_test.go
   - match: 57d4c1be78223b477215a9133e64eed43804b319138ad69e0d4f4d5b0ada836b

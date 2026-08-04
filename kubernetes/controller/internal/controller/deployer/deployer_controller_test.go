@@ -34,14 +34,11 @@ import (
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
 	"ocm.software/open-component-model/bindings/go/blob/inmemory"
 	"ocm.software/open-component-model/bindings/go/ctf"
-	"ocm.software/open-component-model/bindings/go/descriptor/normalisation"
-	"ocm.software/open-component-model/bindings/go/descriptor/normalisation/json/v4alpha1"
 	descruntime "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/oci"
 	ocictf "ocm.software/open-component-model/bindings/go/oci/ctf"
 	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
-	signingv1alpha1 "ocm.software/open-component-model/bindings/go/rsa/signing/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	"ocm.software/open-component-model/bindings/go/signing"
 	"ocm.software/open-component-model/kubernetes/controller/api/v1alpha1"
@@ -874,12 +871,8 @@ data:
 
 			By("signing the component version")
 			signatureName := "deployer-test-sig"
-			normalised, err := normalisation.Normalise(desc, v4alpha1.Algorithm)
-			Expect(err).ToNot(HaveOccurred())
-			signature, pubKey := test.SignComponent(ctx, signatureName, signingv1alpha1.AlgorithmRSASSAPSS, normalised, pm)
-			desc.Signatures = append(desc.Signatures, signature)
-
-			Expect(repo.AddComponentVersion(ctx, desc)).To(Succeed())
+			signed := test.SignComponent(ctx, signatureName, desc, pm)
+			Expect(repo.AddComponentVersion(ctx, signed.Descriptor)).To(Succeed())
 
 			repoSpec := &ctfv1.Repository{
 				Type:       runtime.Type{Name: "ctf", Version: "v1"},
@@ -904,8 +897,8 @@ data:
 					},
 					Verify: []v1alpha1.Verification{
 						{
-							Signature: signatureName,
-							Value:     base64.StdEncoding.EncodeToString([]byte(pubKey)),
+							Signature: signed.RSA.SignatureName,
+							Value:     base64.StdEncoding.EncodeToString([]byte(signed.RSA.PublicKey)),
 						},
 					},
 				},
@@ -1102,11 +1095,8 @@ data:
 
 			By("signing the parent component")
 			signatureName := "ref-chain-sig"
-			normalised, err := normalisation.Normalise(parentDesc, v4alpha1.Algorithm)
-			Expect(err).ToNot(HaveOccurred())
-			signature, pubKey := test.SignComponent(ctx, signatureName, signingv1alpha1.AlgorithmRSASSAPSS, normalised, pm)
-			parentDesc.Signatures = append(parentDesc.Signatures, signature)
-			Expect(repo.AddComponentVersion(ctx, parentDesc)).To(Succeed())
+			signed := test.SignComponent(ctx, signatureName, parentDesc, pm)
+			Expect(repo.AddComponentVersion(ctx, signed.Descriptor)).To(Succeed())
 
 			repoSpec := &ctfv1.Repository{
 				Type:       runtime.Type{Name: "ctf", Version: "v1"},
@@ -1131,8 +1121,8 @@ data:
 					},
 					Verify: []v1alpha1.Verification{
 						{
-							Signature: signatureName,
-							Value:     base64.StdEncoding.EncodeToString([]byte(pubKey)),
+							Signature: signed.RSA.SignatureName,
+							Value:     base64.StdEncoding.EncodeToString([]byte(signed.RSA.PublicKey)),
 						},
 					},
 				},
@@ -1365,11 +1355,8 @@ data:
 
 			By("signing the parent component with the real key")
 			signatureName := "bad-verify-sig"
-			normalised, err := normalisation.Normalise(parentDesc, v4alpha1.Algorithm)
-			Expect(err).ToNot(HaveOccurred())
-			signature, _ := test.SignComponent(ctx, signatureName, signingv1alpha1.AlgorithmRSASSAPSS, normalised, pm)
-			parentDesc.Signatures = append(parentDesc.Signatures, signature)
-			Expect(repo.AddComponentVersion(ctx, parentDesc)).To(Succeed())
+			signed := test.SignComponent(ctx, signatureName, parentDesc, pm)
+			Expect(repo.AddComponentVersion(ctx, signed.Descriptor)).To(Succeed())
 
 			By("generating a different RSA key to use as the wrong public key")
 			wrongKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -1412,7 +1399,7 @@ data:
 					},
 					Verify: []v1alpha1.Verification{
 						{
-							Signature: signatureName,
+							Signature: signed.RSA.SignatureName,
 							Value:     base64.StdEncoding.EncodeToString([]byte(wrongPubKey)),
 						},
 					},

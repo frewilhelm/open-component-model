@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
+	genericv1 "ocm.software/open-component-model/bindings/go/configuration/generic/v1/spec"
 	"ocm.software/open-component-model/bindings/go/plugin/manager"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	"ocm.software/open-component-model/kubernetes/controller/api/v1alpha1"
@@ -299,20 +300,24 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 		return ctrl.Result{}, fmt.Errorf("failed to decode repository spec: %w", err)
 	}
 
-	// Add verifications from the component to the cache-backed repository to make sure they are included in the
-	// cache key and used for verification.
-	verifications, err := verification.GetVerifications(ctx, r.Client, component)
-	if err != nil {
-		status.MarkNotReady(r.EventRecorder, resource, v1alpha1.GetComponentVersionFailedReason, err.Error())
-
-		return ctrl.Result{}, fmt.Errorf("failed to get verifications: %w", err)
-	}
-
 	cfg, err := configuration.LoadConfigurations(ctx, r.Client, resource.GetNamespace(), configs)
 	if err != nil {
 		status.MarkNotReady(r.EventRecorder, resource, v1alpha1.GetComponentVersionFailedReason, err.Error())
 
 		return ctrl.Result{}, fmt.Errorf("failed to load configurations: %w", err)
+	}
+
+	// Add verifications from the component to the cache-backed repository to make sure they are included in the
+	// cache key and used for verification.
+	var signingConfig *genericv1.Config
+	if cfg != nil {
+		signingConfig = cfg.Config
+	}
+	verifications, err := verification.GetVerifications(ctx, r.Client, signingConfig, component)
+	if err != nil {
+		status.MarkNotReady(r.EventRecorder, resource, v1alpha1.GetComponentVersionFailedReason, err.Error())
+
+		return ctrl.Result{}, fmt.Errorf("failed to get verifications: %w", err)
 	}
 
 	cacheBackedRepo, err := r.Resolver.NewCacheBackedRepository(ctx, &resolution.RepositoryOptions{

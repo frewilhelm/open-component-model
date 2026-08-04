@@ -25,6 +25,8 @@ import (
 	metricserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	ocicredentials "ocm.software/open-component-model/bindings/go/oci/credentials"
+	gpghandler "ocm.software/open-component-model/bindings/go/gpg/signing/handler"
+	gpgcredsv1alpha1 "ocm.software/open-component-model/bindings/go/gpg/spec/credentials/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/oci/repository/provider"
 	v1 "ocm.software/open-component-model/bindings/go/oci/spec/identity/v1"
 	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
@@ -148,6 +150,13 @@ var _ = BeforeSuite(func() {
 	signingHandler, err := handler.New(signingv1alpha1.Scheme, true)
 	Expect(err).ToNot(HaveOccurred())
 	Expect(pm.SigningRegistry.RegisterInternalComponentSignatureHandler(signingHandler)).To(Succeed())
+
+	gpgSigningHandler, err := gpghandler.New(nil)
+	Expect(err).ToNot(HaveOccurred())
+	Expect(pm.SigningRegistry.RegisterInternalComponentSignatureHandler(gpgSigningHandler)).To(Succeed())
+	gpgCredScheme := ocmruntime.NewScheme()
+	gpgcredsv1alpha1.MustRegisterCredentialType(gpgCredScheme)
+	pm.CredentialRepositoryRegistry.Register(gpgCredScheme)
 	Expect(pm.CredentialRepositoryRegistry.RegisterInternalCredentialRepositoryPlugin(
 		&ocicredentials.OCICredentialRepository{},
 		[]ocmruntime.Type{v1.Type},

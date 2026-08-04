@@ -12,6 +12,8 @@ import (
 	"github.com/go-logr/logr"
 
 	"ocm.software/open-component-model/bindings/go/blob"
+	genericv1 "ocm.software/open-component-model/bindings/go/configuration/generic/v1/spec"
+	"ocm.software/open-component-model/bindings/go/credentials"
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/plugin/manager/registries/signinghandler"
@@ -37,6 +39,9 @@ type CacheBackedRepository struct {
 	// signingRegistry holds all plugins that implement capabilities to verify signatures and is used during resolution
 	// to verify component versions based on their signatures.
 	signingRegistry *signinghandler.SigningRegistry
+	// credentialGraph resolves typed credentials from the ocm credentials config; used by signature verification
+	// when a Verification does not carry inline key material.
+	credentialGraph credentials.Resolver
 	workerPool      *workerpool.WorkerPool
 	logger          *logr.Logger
 	// requesterFunc is used to get a collection of types.NamespacedNames that want to listen to reconcile events
@@ -66,6 +71,11 @@ func (c *CacheBackedRepository) GetComponentVersion(ctx context.Context, compone
 		configHash = c.cfg.Hash
 	}
 
+	var signingConfig *genericv1.Config
+	if c.cfg != nil {
+		signingConfig = c.cfg.Config
+	}
+
 	keyFunc := func() (string, error) {
 		// The baseRepoSpec is not necessarily the repository used to resolve the component.
 		// The actual repository is determined by the providers resolver
@@ -87,6 +97,8 @@ func (c *CacheBackedRepository) GetComponentVersion(ctx context.Context, compone
 		Verifications:   c.verifications,
 		Digest:          c.digest,
 		SigningRegistry: c.signingRegistry,
+		SigningConfig:   signingConfig,
+		CredentialGraph: c.credentialGraph,
 		Repository:      repo,
 		KeyFunc:         keyFunc,
 		Requester:       c.requesterFunc(),

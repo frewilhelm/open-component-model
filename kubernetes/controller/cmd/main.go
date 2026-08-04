@@ -27,6 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	filesystemv1alpha1 "ocm.software/open-component-model/bindings/go/configuration/filesystem/v1alpha1/spec"
+	gpghandler "ocm.software/open-component-model/bindings/go/gpg/signing/handler"
+	gpgcredsv1alpha1 "ocm.software/open-component-model/bindings/go/gpg/spec/credentials/v1alpha1"
 	helmdigest "ocm.software/open-component-model/bindings/go/helm/digest"
 	helmcredspec "ocm.software/open-component-model/bindings/go/helm/spec/credentials"
 	ocicredentials "ocm.software/open-component-model/bindings/go/oci/credentials"
@@ -41,6 +43,9 @@ import (
 	signingv1alpha1 "ocm.software/open-component-model/bindings/go/rsa/signing/v1alpha1"
 	rsacredspec "ocm.software/open-component-model/bindings/go/rsa/spec/credentials"
 	ocmruntime "ocm.software/open-component-model/bindings/go/runtime"
+	sigstorehandler "ocm.software/open-component-model/bindings/go/sigstore/signing/handler"
+	sigstoreoidccredspec "ocm.software/open-component-model/bindings/go/sigstore/spec/credentials/oidcidentitytoken"
+	sigstoretrustedrootcredspec "ocm.software/open-component-model/bindings/go/sigstore/spec/credentials/trustedroot"
 	"ocm.software/open-component-model/kubernetes/controller/api/v1alpha1"
 	"ocm.software/open-component-model/kubernetes/controller/internal/controller/component"
 	"ocm.software/open-component-model/kubernetes/controller/internal/controller/deployer"
@@ -233,6 +238,31 @@ func main() {
 		os.Exit(1)
 	}
 	pm.CredentialRepositoryRegistry.Register(rsacredspec.Scheme)
+
+	gpgSigningHandler, err := gpghandler.New(nil)
+	if err != nil {
+		setupLog.Error(err, "failed to create GPG signing handler")
+		os.Exit(1)
+	}
+	if err := pm.SigningRegistry.RegisterInternalComponentSignatureHandler(gpgSigningHandler); err != nil {
+		setupLog.Error(err, "failed to register internal GPG signing plugin")
+		os.Exit(1)
+	}
+	gpgCredScheme := ocmruntime.NewScheme()
+	gpgcredsv1alpha1.MustRegisterCredentialType(gpgCredScheme)
+	pm.CredentialRepositoryRegistry.Register(gpgCredScheme)
+
+	// Register the Sigstore signing handler. Keyless verification requires a
+	// SigstoreVerificationConfiguration (identity constraints, optional trusted
+	// root) which the user supplies through the ocm signing config
+	// (signing.config.ocm.software) referenced via the Component's OCMConfig
+	// field.
+	if err := pm.SigningRegistry.RegisterInternalComponentSignatureHandler(sigstorehandler.New()); err != nil {
+		setupLog.Error(err, "failed to register internal Sigstore signing plugin")
+		os.Exit(1)
+	}
+	pm.CredentialRepositoryRegistry.Register(sigstoreoidccredspec.Scheme)
+	pm.CredentialRepositoryRegistry.Register(sigstoretrustedrootcredspec.Scheme)
 
 	if err := pm.CredentialRepositoryRegistry.RegisterInternalCredentialRepositoryPlugin(
 		&ocicredentials.OCICredentialRepository{},

@@ -22,13 +22,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"ocm.software/open-component-model/bindings/go/descriptor/normalisation"
-	"ocm.software/open-component-model/bindings/go/descriptor/normalisation/json/v4alpha1"
 	descruntime "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	ocirepository "ocm.software/open-component-model/bindings/go/oci/repository"
 	ocispec "ocm.software/open-component-model/bindings/go/oci/spec/access/v1"
 	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
-	signingv1alpha1 "ocm.software/open-component-model/bindings/go/rsa/signing/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	"ocm.software/open-component-model/bindings/go/signing"
 	"ocm.software/open-component-model/kubernetes/controller/api/v1alpha1"
@@ -1497,12 +1494,8 @@ var _ = Describe("Resource Controller", func() {
 
 			By("signing the parent component version")
 			signatureName := "test-signature"
-			normalised, err := normalisation.Normalise(desc, v4alpha1.Algorithm)
-			Expect(err).ToNot(HaveOccurred())
-			signature, pubKey := test.SignComponent(ctx, signatureName, signingv1alpha1.AlgorithmRSASSAPSS, normalised, pm)
-
-			desc.Signatures = append(desc.Signatures, signature)
-			Expect(repo.AddComponentVersion(ctx, desc)).To(Succeed())
+			signed := test.SignComponent(ctx, signatureName, desc, pm)
+			Expect(repo.AddComponentVersion(ctx, signed.Descriptor)).To(Succeed())
 
 			By("mocking a component")
 			namespace := test.NamespaceForTest(ctx)
@@ -1521,8 +1514,8 @@ var _ = Describe("Resource Controller", func() {
 					Repository: repositoryName,
 					Verify: []v1alpha1.Verification{
 						{
-							Signature: signatureName,
-							Value:     base64.StdEncoding.EncodeToString([]byte(pubKey)),
+							Signature: signed.RSA.SignatureName,
+							Value:     base64.StdEncoding.EncodeToString([]byte(signed.RSA.PublicKey)),
 						},
 					},
 				},
