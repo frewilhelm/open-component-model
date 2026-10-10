@@ -1,0 +1,99 @@
+components:
+  # Top component: what the user deploys. Carries the chart, the kustomize
+  # variant, the images, the local config, and a reference to a shared
+  # central-config component.
+  - name: ocm.software/ocm-k8s-toolkit/examples/deployment
+    version: "1.0.0"
+    provider:
+      name: ocm.software
+    componentReferences:
+      # Shared config lives in its own component, referenced here. A Deployment
+      # addresses its resource through this reference (see deployments.yaml).
+      - name: central-config
+        componentName: ocm.software/ocm-k8s-toolkit/examples/deployment/central-config
+        version: "1.0.0"
+    resources:
+      # --- deploy resources ---------------------------------------------------
+      # Helm chart (Flux+Helm and Argo+Helm variants).
+      - name: podinfo-chart
+        type: helmChart
+        version: "1.0.0"
+        access:
+          type: ociArtifact
+          imageReference: "ghcr.io/stefanprodan/charts/podinfo:6.9.1@sha256:565d310746f1fa4be7f93ba7965bb393153a2d57a15cfe5befc909b790a73f8a"
+      # Kustomize manifests (Flux+Kustomize and Argo+Kustomize variants). The e2e
+      # harness builds ./oci-layout from ./kustomize before `ocm add cv` (it runs
+      # buildKustomizeOCILayout whenever a kustomize/ dir is present). Do not
+      # commit ./oci-layout (see .gitignore).
+      - name: podinfo-kustomize
+        type: ociArtifact
+        version: "1.0.0"
+        input:
+          type: dir/v1
+          path: ./oci-layout
+          mediaType: application/vnd.ocm.software.oci.layout.v1+tar
+
+      # --- localizable images -------------------------------------------------
+      # The image resources carry only their access. `ocm add cv --localize-hints`
+      # attaches the signed `ocm.software/localization` label to every OCI
+      # resource, snapshotting its ORIGINAL coordinates as the match key (which
+      # transfer would otherwise overwrite in the access). The labels are not
+      # hand-written here, the same way the resource digest is computed, not authored.
+      #
+      # Split-field image whose chart `repository` embeds the registry (podinfo
+      # values: image.repository: ghcr.io/stefanprodan/podinfo, image.tag: 6.9.1,
+      # no digest field, so tag-only).
+      - name: podinfo-image
+        type: ociImage
+        version: "1.0.0"
+        access:
+          type: ociArtifact
+          imageReference: "ghcr.io/stefanprodan/podinfo:6.9.1@sha256:262578cde928d5c9eba3bce079976444f624c13ed0afb741d90d5423877496cb"
+      # Bare-name image. podinfo writes redis.repository: redis, which normalizes
+      # to docker.io/library/redis. Second image, different value path (redis.*
+      # not image.*). Rendered only when redis.enabled is true, which local-config
+      # sets. Also tag-only. The 7.0.7 tag matches podinfo 6.9.1's redis.tag
+      # default, so localization is coupled to the chart version.
+      - name: redis-image
+        type: ociImage
+        version: "1.0.0"
+        access:
+          type: ociArtifact
+          imageReference: "docker.io/library/redis:7.0.7@sha256:bb474c35022ca2c5618f4c49ca759bd2c0eea1daf5d934c560bd30092b97b498"
+      # Also labelled by --localize-hints (it is an OCI image) but NOT referenced
+      # by the podinfo chart, so localization matches nothing for it: it is absent
+      # from status.appliedLocalizations and the deploy still succeeds.
+      - name: unused-image
+        type: ociImage
+        version: "1.0.0"
+        access:
+          type: ociArtifact
+          imageReference: "docker.io/library/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
+
+      # --- config data (in-component) ----------------------------------------
+      # Local config, layered over the central config. Enables redis (so the redis
+      # image is rendered and localized), bumps replicas, and overrides the central
+      # ui.color to show local beats central.
+      - name: local-config
+        type: yaml
+        version: "1.0.0"
+        input:
+          type: file
+          path: ./config/local-values.yaml
+          mediaType: application/x-yaml
+
+  # Central/shared config component, referenced by the top component. Supplies the
+  # central ui.message, demonstrating config-data sourced through a component
+  # reference rather than from the deployed component itself.
+  - name: ocm.software/ocm-k8s-toolkit/examples/deployment/central-config
+    version: "1.0.0"
+    provider:
+      name: ocm.software
+    resources:
+      - name: central-config
+        type: yaml
+        version: "1.0.0"
+        input:
+          type: file
+          path: ./config/central-values.yaml
+          mediaType: application/x-yaml

@@ -1,0 +1,36 @@
+# Flux + Helm. The single resource the user applies: the controller creates the
+# Repository, Component, Resource objects and a Flux OCIRepository + HelmRelease,
+# with the podinfo and redis images localized and the config merged into
+# HelmRelease.spec.values.
+apiVersion: delivery.ocm.software/v1alpha1
+kind: Deployment
+metadata:
+  name: deployment-flux-helm
+spec:
+  componentVersionRef: "http://ocm-e2e-image-registry:5000//ocm.software/ocm-k8s-toolkit/examples/deployment:1.0.0"
+  deployResource:
+    byReference:
+      resource:
+        name: podinfo-chart
+  deployer: FluxCD
+  # Config layers (low to high precedence): chart defaults < localization <
+  # central-config (via the component reference) < local-config < this inline
+  # config. ui.message comes from central and survives; ui.color is overridden
+  # central(#111111) -> local(#222222) -> inline(#326ce5) to show the chain.
+  configResources:
+    - byReference:
+        resource:
+          name: central-config
+        referencePath:
+          - name: central-config
+    - byReference:
+        resource:
+          name: local-config
+  config:
+    ui:
+      color: "#326ce5"
+  targetNamespace: deployment-flux-helm
+  createNamespace: true
+  releaseName: podinfo
+  serviceAccountName: deployment-sa
+  interval: 1m

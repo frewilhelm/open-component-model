@@ -1,0 +1,20 @@
+# Flux + Kustomize. Localization-only: the controller creates a Flux OCIRepository
+# + Kustomization and injects a kustomize images transformer that rewrites the
+# whole-string image in the manifests to the relocated location. Kustomize has no
+# values field, so the Helm-shaped configResources are not used here (config for
+# kustomize would be expressed as patches; see README).
+apiVersion: delivery.ocm.software/v1alpha1
+kind: Deployment
+metadata:
+  name: deployment-flux-kustomize
+spec:
+  componentVersionRef: "http://ocm-e2e-image-registry:5000//ocm.software/ocm-k8s-toolkit/examples/deployment:1.0.0"
+  deployResource:
+    byReference:
+      resource:
+        name: podinfo-kustomize
+  deployer: FluxCD
+  targetNamespace: deployment-flux-kustomize
+  createNamespace: true
+  serviceAccountName: deployment-sa
+  interval: 1m

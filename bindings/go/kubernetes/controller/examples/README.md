@@ -3,7 +3,8 @@
 This directory contains end-to-end examples demonstrating how to use the OCM Kubernetes Controller Toolkit.
 Each example is self-contained: it includes a component definition (`component-constructor.yaml`), a bootstrap
 manifest (`bootstrap.yaml`), and — where deployment is needed — a kro `ResourceGraphDefinition` (`rgd.yaml`)
-and an instance manifest (`instance.yaml`).
+and an instance manifest (`instance.yaml`). The `deployment` example is the exception: the user
+applies a single `Deployment` resource and the controller creates the OCM and deploy objects itself.
 
 ## Prerequisites
 
@@ -27,6 +28,7 @@ See the [installation notes in the root README](../README.md#installation) for d
 | [`helm-configuration-localization`](#helm-configuration-localization) | FluxCD + ArgoCD | Image localization + Helm value injection |
 | [`kustomize-simple`](#kustomize-simple) | FluxCD + ArgoCD | Kustomize overlay from a Git-sourced OCM resource |
 | [`kustomize-configuration-localization`](#kustomize-configuration-localization) | FluxCD + ArgoCD | Image localization via Kustomize JSON patches |
+| [`deployment`](#deployment) | FluxCD + ArgoCD | Single `Deployment` CR with image localization and config |
 | [`k8s-manifest-simple`](#k8s-manifest-simple) | (raw kubectl) | Applying a plain Kubernetes manifest from an OCM resource |
 | [`applyset-pruning`](#applyset-pruning) | (raw kubectl) | Pruning orphaned resources with ApplySet |
 
@@ -163,6 +165,17 @@ Demonstrates how orphaned resources are pruned when an OCM component version is 
 [ApplySet](https://kubernetes.io/docs/reference/labels-annotations-taints/) for pruning instead of a
 GitOps deployer. This example has its own dedicated e2e test file (`test/e2e/e2e_applyset_test.go`) and is
 excluded from the generic examples test loop.
+
+---
+
+## deployment
+
+**Deployers:** FluxCD + ArgoCD
+
+Deploys podinfo by applying a single `Deployment` resource; the controller creates the `Repository`,
+`Component`, and `Resource` objects and the Flux/Argo deploy objects, localizes the images, and merges
+configuration. Covers Helm and kustomize, config from a referenced component, and the localization
+edge cases. See the example's own [README](./deployment/README.md).
 
 ---
 

@@ -1,0 +1,8 @@
+# Local config, in the deployed component. Layered over central-config, under the
+# inline Deployment config. Enables redis (so the redis image is actually rendered
+# and localized) and overrides the central ui.color to show local beats central.
+replicaCount: 2
+redis:
+  enabled: true
+ui:
+  color: "#222222"

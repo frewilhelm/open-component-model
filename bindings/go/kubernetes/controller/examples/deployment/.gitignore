@@ -1,0 +1,5 @@
+# Built at e2e time by utils.PrepareOCMComponent (buildKustomizeOCILayout, via
+# oras --oci-layout) from ./kustomize/. Referenced by component-constructor.yaml
+# as a dir/v1 input. Not checked in.
+oci-layout/
+*.tar.gz

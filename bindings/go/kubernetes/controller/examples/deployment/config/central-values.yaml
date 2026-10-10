@@ -1,0 +1,6 @@
+# Central/shared config, delivered in a separate component and pulled in through
+# a component reference. Provides the ui.message (which survives the merge and is
+# visible in the pod) and a ui.color that lower-precedence layers override.
+ui:
+  message: "Hello from the central config component"
+  color: "#111111"
