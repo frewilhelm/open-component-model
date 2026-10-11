@@ -1,10 +1,10 @@
-# Deployment: deployer-agnostic single-resource deployment with construction-derived localization
+# OCMDeployment: deployer-agnostic single-resource deployment with construction-derived localization
 
 * **Status**: proposed
 * **Date**: 2026-10-08
 
 Technical Story: OCM needs a simplified, deployer-agnostic entry point for delivery. This ADR defines
-the `Deployment` resource and the contract by which it localizes and configures a Helm chart or
+the `OCMDeployment` resource and the contract by which it localizes and configures a Helm chart or
 kustomization delivered in a component version. The status quo it improves on is described below.
 
 ## Context and Problem Statement
@@ -21,7 +21,7 @@ A single applied resource should name a component version, the resource to deplo
 and a config, and have the controller produce the low-level deploy objects with images localized and
 values configured, without KRO.
 
-`Deployment` is an addition, not a replacement. It sits beside the existing `Deployer` CR (which
+`OCMDeployment` is an addition, not a replacement. It sits beside the existing `Deployer` CR (which
 applies a KRO `ResourceGraphDefinition`) and reuses its apply/prune machinery. Its primary purpose is
 to migrate v1 users to v2 and lower the adoption bar for the common case. We accept consciously that
 this is neither perfectly clean nor fully deployer-agnostic.
@@ -39,17 +39,23 @@ target namespace, release name, interval) and default the rest.
 
 ## Decision Outcome
 
-The `Deployment` is a namespaced wrapper (orchestrating) custom resource
-(`delivery.ocm.software/v1alpha1`, kind `Deployment`): it is the only resource the user applies, and
+The `OCMDeployment` is a namespaced wrapper (orchestrating) custom resource
+(`delivery.ocm.software/v1alpha1`, kind `OCMDeployment`): it is the only resource the user applies, and
 its controller creates and owns the lower-level resources the user would otherwise author by hand. It
-is namespaced and applies with a ServiceAccount's permissions, following the `NamespacedDeployer`
-direction (the cluster-scoped `Deployer` is being deprecated). The controller stays thin: it creates
-the children once and then reacts to their status, instead of re-resolving on every reconcile.
+is namespaced and applies the generated deploy objects by **impersonating** the required
+`spec.serviceAccountName` (new code following the `NamespacedDeployer` model; the cluster-scoped
+`Deployer` is being deprecated), so they are created with that SA's permissions, not the controller's.
+The controller's `impersonate` RBAC is scoped to same-namespace ServiceAccounts and the named SA must
+resolve in the `OCMDeployment`'s namespace, so creating an `OCMDeployment` in namespace N is
+equivalent to acting as any SA in N; cross-namespace deploys happen only because the impersonated SA
+itself holds rights in the target namespace, never through the controller's own privilege. The
+controller stays thin: it creates the children once and then reacts to their status, instead of
+re-resolving on every reconcile.
 
 Cleanup has two distinct layers, both same-namespace so owner references stay valid. The child OCM
-CRs (`Repository`, `Component`, `Resource`) are created in the `Deployment`'s namespace with the
-`Deployment` as owner reference and are garbage-collected with it. The generated deploy objects
-(`HelmRelease`/`Kustomization`/Argo `Application`) also live in the `Deployment`'s namespace and are
+CRs (`Repository`, `Component`, `Resource`) are created in the `OCMDeployment`'s namespace with the
+`OCMDeployment` as owner reference and are garbage-collected with it. The generated deploy objects
+(`HelmRelease`/`Kustomization`/Argo `Application`) also live in the `OCMDeployment`'s namespace and are
 applied and pruned via the ApplySet machinery (with its finalizer) that the `(Namespaced)Deployer`
 uses; `TargetNamespace` only selects where the engine places the rendered workloads, not where the
 deploy object itself lives, so there is no cross-namespace owner reference. Deploying to a different
@@ -60,44 +66,58 @@ Localization is derived at construction and carried as signed per-resource label
 localization are applied through the deployer's native mechanism (Helm values, or kustomize
 patches/`images`).
 
-### Deployment resource
+### OCMDeployment resource
 
 ```go
-type DeploymentSpec struct {
-    // ComponentVersionRef is an OCM component reference, host/path//component:version,
-    // The controller splits off the version segment and resolves the
-    // host/path//component portion and creates the child Repository and Component.
-    // The version segment is passed verbatim to the child Component's semver field,
-    // so it may be an exact version or a semver range.
-    ComponentVersionRef string `json:"componentVersionRef"`
+type OCMDeploymentSpec struct {
+    // RepositorySpec is the ocm repository configuration, as in the Repository CR
+    // (for example {type: OCIRegistry, baseUrl: http://...}, or any other OCM
+    // repository implementation). The controller creates a Repository from it. An
+    // insecure or local registry is expressed here (http baseUrl), not via a ref scheme.
+    // +required
+    RepositorySpec *apiextensionsv1.JSON `json:"repositorySpec"`
+    // Component is the ocm component name; the controller creates a Component from it.
+    // +required
+    Component string `json:"component"`
+    // Semver constrains the component version (exact or range).
+    // +required
+    Semver string `json:"semver"`
+    // SemverFilter optionally filters versions within the Semver range.
+    // +optional
+    SemverFilter string `json:"semverFilter,omitempty"`
     // DeployResource identifies the OCM resource to deploy (helmChart or kustomize).
     // The artifact kind (Helm vs kustomize) is derived from the OCM resource type.
+    // +required
     DeployResource ResourceID `json:"deployResource"`
     // Deployer selects the deployment engine.
     // +kubebuilder:validation:Enum:=FluxCD;ArgoCD
+    // +required
     Deployer DeployerEngine `json:"deployer"`
     // TargetNamespace is the namespace the workload is deployed into
-    // Defaults to the Deployment's own namespace.
+    // Defaults to the OCMDeployment's own namespace.
     // +optional
     TargetNamespace string `json:"targetNamespace,omitempty"`
     // CreateNamespace creates TargetNamespace if it does not exist.
     // +kubebuilder:default:=true
     // +optional
-    CreateNamespace bool `json:"createNamespace,omitempty"`
-    // ReleaseName overrides the Helm release name (defaults to the Deployment
-    // name). Ignored for kustomize.
+    CreateNamespace *bool `json:"createNamespace,omitempty"`
+    // ReleaseName overrides the Helm release name (defaults to the OCMDeployment
+    // name, so two OCMDeployments do not collide unless both override it to the
+    // same value in the same TargetNamespace). Ignored for kustomize.
     // +optional
     ReleaseName string `json:"releaseName,omitempty"`
-    // ServiceAccountName is the ServiceAccount whose permissions the controller
-    // uses to apply the generated deploy objects. Empty means the controller's
-    // own identity (discouraged, matching the deprecated cluster-scoped Deployer).
-    // +optional
-    ServiceAccountName string `json:"serviceAccountName,omitempty"`
+    // ServiceAccountName is the ServiceAccount the controller impersonates to apply
+    // the generated deploy objects, so they are created with that SA's permissions.
+    // Required: applying with the controller's own identity is not allowed. The SA
+    // must exist in the OCMDeployment's own namespace.
+    // +required
+    ServiceAccountName string `json:"serviceAccountName"`
     // ConfigResources references OCM resources holding yaml used as values/config.
     // +optional
     ConfigResources []ResourceID `json:"configResources,omitempty"`
     // Config is inline, schemaless configuration merged over ConfigResources.
     // +kubebuilder:validation:Type=object
+    // +kubebuilder:validation:Schemaless
     // +kubebuilder:validation:XPreserveUnknownFields
     // +optional
     Config *apiextensionsv1.JSON `json:"config,omitempty"`
@@ -105,14 +125,15 @@ type DeploymentSpec struct {
     // and credentials, like every other CR.
     // +optional
     OCMConfig []OCMConfiguration `json:"ocmConfig,omitempty"`
-    // Interval at which the Deployment is reconciled. Required because it sits
+    // Interval at which the OCMDeployment is reconciled. Required because it sits
     // on top of the Repository/Component polling cadence.
+    // +required
     Interval metav1.Duration `json:"interval"`
     // +optional
     Suspend bool `json:"suspend,omitempty"`
 }
 
-type DeploymentStatus struct {
+type OCMDeploymentStatus struct {
     ObservedGeneration int64                     `json:"observedGeneration,omitempty"`
     Conditions         []metav1.Condition        `json:"conditions,omitempty"`
     EffectiveOCMConfig []OCMConfiguration        `json:"effectiveOCMConfig,omitempty"`
@@ -133,38 +154,44 @@ type DeploymentStatus struct {
 type AppliedLocalization struct {
     Original string `json:"original"`
     Applied  string `json:"applied"`
+    // DigestPinned is false when the chart exposed only a tag (no digest field),
+    // so the substituted location is not digest-verified (see Localization). The
+    // controller also emits a warning Event for such images.
+    DigestPinned bool `json:"digestPinned"`
 }
 ```
 
-`ComponentVersionRef` is split by the controller into the repository (parsed into a typed repository
-spec) and component name, which create the child `Repository` and `Component`, and a version segment
-passed verbatim to `Component.semver`, so it may be an exact version or a range. `ConfigResources`
-is `[]ResourceID` (OCM resources inside the component), distinct from `OCMConfig`
-(`[]OCMConfiguration`), which carries ocm config and credentials. They are not merged. The component
-reference may carry a scheme (for example `http://` for an insecure local registry); it becomes the
-derived `Repository`'s `baseUrl`, and the controller sets the generated engine source insecure
-accordingly. `ocmConfig` carries any registry credentials.
+The type carries `+kubebuilder:subresource:status` and Ready/Age print columns like the peer CRDs;
+status fields are `+optional`, `AppliedLocalization` fields `+required`.
 
-Status rolls the deploy object's own readiness up into the `Deployment`'s `Ready` condition (Flux
+`RepositorySpec`, `Component`, and `Semver` map directly onto the child `Repository` and `Component`
+(no reference parsing); any OCM repository type the `repositorySpec` supports works, and an insecure
+or local registry is expressed in `repositorySpec` (e.g. `baseUrl: http://...`) as in the `Repository`
+CR. `ConfigResources` is `[]ResourceID` (OCM resources inside the component), distinct from
+`OCMConfig` (`[]OCMConfiguration`), which carries ocm config and credentials. They are not merged.
+`ocmConfig` carries any registry credentials; the controller sets the generated engine source insecure
+when the resolved location is http.
+
+Status rolls the deploy object's own readiness up into the `OCMDeployment`'s `Ready` condition (Flux
 `HelmRelease`/`Kustomization` `Ready`, or Argo `Application` health plus sync), and records the live
-component version and deploy-resource digest and the applied localizations, so the single `Deployment`
+component version and deploy-resource digest and the applied localizations, so the single `OCMDeployment`
 reflects the outcome without the user inspecting the children.
 
 ### Managed resources
 
-From one `Deployment` the controller creates and owns:
+From one `OCMDeployment` the controller creates and owns:
 
-* **`Repository` and `Component`**, built from the parsed `ComponentVersionRef`. The `Component`
+* **`Repository` and `Component`**, built from `repositorySpec` and `component`+`semver`. The `Component`
   resolves the version against the repository once and tracks drift, so later reconciles reuse the
   cached resolution instead of re-fetching the descriptor.
 * **A `Resource` for the deploy resource**. Its status provides the verified OCI coordinates used to
-  build the `OCIRepository`/source. The `Deployment` controller then downloads the chart (as its OCI
+  build the `OCIRepository`/source. The `OCMDeployment` controller then downloads the chart (as its OCI
   artifact) and reads its default `values.yaml`, or the kustomization manifests, for localization
   matching. Subchart/dependency images and aliased subchart values are out of scope for the initial
-  design. The `Resource` verifies the digest; the download itself is done by the `Deployment`
+  design. The `Resource` verifies the digest; the download itself is done by the `OCMDeployment`
   controller, because the `Resource` controller only resolves and verifies coordinates, it does not
   download content.
-* **A `Resource` for each config resource**. The `Resource` verifies the digest; the `Deployment`
+* **A `Resource` for each config resource**. The `Resource` verifies the digest; the `OCMDeployment`
   controller downloads the blob content (expected to be a single yaml document) before merging it
   (Helm) or patching it (kustomize) into the deployer values. Locating a file inside an archived
   resource is out of scope.
@@ -178,10 +205,10 @@ From one `Deployment` the controller creates and owns:
   below).
 
 Creating these as first-class `Resource` objects, rather than resolving everything inline in the
-`Deployment` controller, means resolution and verification happen once, are cached and drift-tracked
+`OCMDeployment` controller, means resolution and verification happen once, are cached and drift-tracked
 by the existing controllers, and are visible to the user for debugging. A controller instantiating
 `Repository`/`Component`/`Resource` objects is a new pattern for this project; today those are
-authored by the user or by KRO. Child objects are named after the `Deployment`, so several
+authored by the user or by KRO. Child objects are named after the `OCMDeployment`, so several
 Deployments of the same component version do not collide.
 
 ### Localization
@@ -260,9 +287,11 @@ Integrity comes from the digest, not the label. The resource `digest` is in the 
 it by default unless `--skip-reference-digest-processing` is set. The emitted override therefore
 **pins the signed digest when the chart's image field accepts a digest, and substitutes
 registry+repository+tag otherwise**. The label is the match key that survives transfer; the digest is
-the tamper-evidence. Consequence of tag-only charts: Helm resolves the image by tag at pull time, so
-there is a resolve-time-vs-pull-time gap and weaker integrity than a digest pin. This is inherent to
-tag-only charts and is documented, not solved.
+the tamper-evidence. Tag-only charts cannot be digest-pinned, so the substituted location rides on the
+unsigned (relocated) `access` with no digest to verify it, and Helm pulls by tag at runtime: this is
+unverified, not merely TOCTOU-weak. It is not fail-closed (the user chose a tag-only chart); instead
+the controller emits a warning Event and sets `appliedLocalizations[].digestPinned: false` for that
+image, so the gap is visible in status.
 
 The labels are derived during `ocm add cv --localize-hints`, before transfer, so they capture the
 original coordinates. The flag labels every resource with an OCI access type (not only those a
@@ -270,7 +299,9 @@ particular chart references, since the chart binding is a deploy-time concern) a
 resource's coordinates plus its digest into the signed label above. The digest is available because
 `add cv` computes it by default; with `--skip-reference-digest-processing` the digest is absent and
 the label carries coordinates only (localization then falls back to tag substitution). The labels may
-also be authored directly in the component-constructor, for manual control or before the flag exists.
+also be authored directly in the component-constructor, for manual control. `--localize-hints` skips
+any resource that already carries the label, so a hand-authored label (for example one with an
+explicit values path for a chart that hides the image) is never overwritten.
 
 ### Configuration and merge order
 
@@ -318,8 +349,8 @@ the generated deploy objects reuse the `(Namespaced)Deployer` ApplySet machinery
 
 ### Positive Consequences
 
-* One applied `Deployment` instead of a hand-authored RGD plus bootstrap objects.
-* The component author stays deployer-agnostic; Flux vs Argo is a `Deployment` field.
+* One applied `OCMDeployment` instead of a hand-authored RGD plus bootstrap objects.
+* The component author stays deployer-agnostic; Flux vs Argo is a `OCMDeployment` field.
 * Localization is automatic; integrity is anchored on the signed digest when the chart allows it.
 * Configuration can be shipped with the component (as `configResources`) and layered per
   deployment via inline `config`.
@@ -334,10 +365,22 @@ the generated deploy objects reuse the `(Namespaced)Deployer` ApplySet machinery
   are out of scope. Normalization handles `docker.io` vs `index.docker.io`, bare names, implicit
   `library/`, and a `repository` that embeds the registry. Kustomize avoids the search entirely via
   its native `images` transformer.
-* Tag-only charts cannot be digest-pinned, giving weaker integrity (see Localization).
-* OCI-only first cut: the component repository and the chart/image/resource access are assumed to be
-  OCI (or CTF); non-OCI component repositories and non-OCI access (Helm HTTP repo, git source) are
-  out of scope.
+* Tag-only charts cannot be digest-pinned, so their localized image is unverified (warned, not
+  blocked; see Localization).
+* Two `OCMDeployment`s that both override `releaseName` to the same value in the same
+  `TargetNamespace` would produce fighting HelmReleases. The default `releaseName` is the
+  `OCMDeployment` name; the controller surfaces `Ready=False` if it detects a release it does not own,
+  and an explicit same-value override is at-your-own-risk.
+* Beyond the single `OCMDeployment`, an operator still provisions a ServiceAccount (plus the Role and
+  binding for the engine kinds) once per namespace, and the controller needs `impersonate` on it. The
+  one-resource claim is about the deploy itself, not this one-time SA setup.
+* Semver downgrades are denied: the child `Component` defaults `DowngradePolicy: Deny` and the
+  `OCMDeployment` exposes no override, so a semver range cannot roll back to a lower version. A field
+  can be added later if rollback is needed.
+* The component repository can be any type `repositorySpec` supports. The deploy-source renderer,
+  however, emits only an OCI source in the first cut; it dispatches on the resolved resource access
+  type, so non-OCI sources (Helm HTTP repo via `HelmRepository`, git via `GitRepository`) are
+  additive, not a redesign. Container images are inherently OCI.
 
 ## Links
 

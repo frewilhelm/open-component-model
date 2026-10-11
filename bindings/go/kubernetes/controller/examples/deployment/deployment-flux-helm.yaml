@@ -3,11 +3,15 @@
 # with the podinfo and redis images localized and the config merged into
 # HelmRelease.spec.values.
 apiVersion: delivery.ocm.software/v1alpha1
-kind: Deployment
+kind: OCMDeployment
 metadata:
   name: deployment-flux-helm
 spec:
-  componentVersionRef: "http://ocm-e2e-image-registry:5000//ocm.software/ocm-k8s-toolkit/examples/deployment:1.0.0"
+  repositorySpec:
+    type: OCIRegistry
+    baseUrl: http://ocm-e2e-image-registry:5000
+  component: ocm.software/ocm-k8s-toolkit/examples/deployment
+  semver: 1.0.0
   deployResource:
     byReference:
       resource:

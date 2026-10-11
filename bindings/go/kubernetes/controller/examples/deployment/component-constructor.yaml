@@ -7,8 +7,8 @@ components:
     provider:
       name: ocm.software
     componentReferences:
-      # Shared config lives in its own component, referenced here. A Deployment
-      # addresses its resource through this reference (see deployments.yaml).
+      # Shared config lives in its own component, referenced here. A OCMDeployment
+      # addresses its resource through this reference (see the deployment-*.yaml manifests).
       - name: central-config
         componentName: ocm.software/ocm-k8s-toolkit/examples/deployment/central-config
         version: "1.0.0"

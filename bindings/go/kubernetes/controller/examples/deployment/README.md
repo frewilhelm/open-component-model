@@ -1,7 +1,7 @@
 # deployment
 
-Deploys podinfo from an OCM component by applying a single `Deployment` resource.
-The `Deployment` controller creates the `Repository`, `Component`, and `Resource`
+Deploys podinfo from an OCM component by applying a single `OCMDeployment` resource.
+The `OCMDeployment` controller creates the `Repository`, `Component`, and `Resource`
 objects and the Flux or Argo deploy objects, localizes the container images, and
 merges configuration into the deployer values. See
 [ADR 0032](../../../../../docs/adr/0032_deployer_agnostic_deployment.md) for the
@@ -89,10 +89,9 @@ oras push --oci-layout ./oci-layout:latest \
    one and `central-config`) and copies the external images into the target registry; with the OCI
    uploader it also converts the kustomize layout to a native OCI artifact. Localization resolves to
    these relocated references.
-3. Apply `serviceaccount.yaml` (the deploy-time ServiceAccount named by each Deployment's
-   `serviceAccountName`), then apply one `deployment-*.yaml`. The `http://` scheme in
-   `componentVersionRef` selects the insecure local registry (it becomes the derived `Repository`'s
-   `baseUrl`).
+3. Apply `serviceaccount.yaml` (the deploy-time ServiceAccount named by each OCMDeployment's
+   `serviceAccountName`), then apply one `deployment-*.yaml`. The `repositorySpec` baseUrl
+   (`http://ocm-e2e-image-registry:5000`) points at the insecure local registry.
 
 ## Editing the kustomize manifests
 
