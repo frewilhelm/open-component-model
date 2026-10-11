@@ -65,6 +65,10 @@ const (
 	// StatusSetFailedReason is used when we fail to set the component status.
 	StatusSetFailedReason = "StatusSetFailed"
 
+	// CreateOrUpdateFailedReason is used when the controller fails to create or
+	// update a child object it owns.
+	CreateOrUpdateFailedReason = "CreateOrUpdateFailed"
+
 	// DeletionFailedReason is used when we fail to delete the resource.
 	DeletionFailedReason = "DeletionFailed"
 
