@@ -114,9 +114,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 func (r *Reconciler) ensureChildren(ctx context.Context, d *v1alpha1.OCMDeployment) error {
 	repo := &v1alpha1.Repository{ObjectMeta: childMeta(d)}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.GetClient(), repo, func() error {
-		repo.Spec.RepositorySpec = d.Spec.RepositorySpec
-		repo.Spec.OCMConfig = d.Spec.OCMConfig
-		repo.Spec.Interval = d.Spec.Interval
+		repo.Spec = desiredRepositorySpec(d)
 		return controllerutil.SetControllerReference(d, repo, r.Scheme)
 	}); err != nil {
 		return fmt.Errorf("failed to upsert child Repository: %w", err)
@@ -124,12 +122,7 @@ func (r *Reconciler) ensureChildren(ctx context.Context, d *v1alpha1.OCMDeployme
 
 	component := &v1alpha1.Component{ObjectMeta: childMeta(d)}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.GetClient(), component, func() error {
-		component.Spec.RepositoryRef = corev1.LocalObjectReference{Name: d.GetName()}
-		component.Spec.Component = d.Spec.Component
-		component.Spec.Semver = d.Spec.Semver
-		component.Spec.SemverFilter = d.Spec.SemverFilter
-		component.Spec.OCMConfig = d.Spec.OCMConfig
-		component.Spec.Interval = d.Spec.Interval
+		component.Spec = desiredComponentSpec(d)
 		return controllerutil.SetControllerReference(d, component, r.Scheme)
 	}); err != nil {
 		return fmt.Errorf("failed to upsert child Component: %w", err)
@@ -137,15 +130,49 @@ func (r *Reconciler) ensureChildren(ctx context.Context, d *v1alpha1.OCMDeployme
 
 	resource := &v1alpha1.Resource{ObjectMeta: childMeta(d)}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.GetClient(), resource, func() error {
-		resource.Spec.ComponentRef = corev1.LocalObjectReference{Name: d.GetName()}
-		resource.Spec.Resource = d.Spec.DeployResource
-		resource.Spec.OCMConfig = d.Spec.OCMConfig
+		resource.Spec = desiredResourceSpec(d)
 		return controllerutil.SetControllerReference(d, resource, r.Scheme)
 	}); err != nil {
 		return fmt.Errorf("failed to upsert child Resource: %w", err)
 	}
 
 	return nil
+}
+
+// desiredRepositorySpec maps the OCMDeployment onto its child Repository. The
+// repositorySpec is opaque OCM repository config, passed through unchanged, so
+// any repository type is supported and an insecure registry is just an http
+// baseUrl inside it.
+func desiredRepositorySpec(d *v1alpha1.OCMDeployment) v1alpha1.RepositorySpec {
+	return v1alpha1.RepositorySpec{
+		RepositorySpec: d.Spec.RepositorySpec,
+		OCMConfig:      d.Spec.OCMConfig,
+		Interval:       d.Spec.Interval,
+	}
+}
+
+// desiredComponentSpec maps the OCMDeployment onto its child Component. Semver
+// and SemverFilter pass through unchanged, so exact versions and ranges behave
+// exactly as they do on a hand-authored Component.
+func desiredComponentSpec(d *v1alpha1.OCMDeployment) v1alpha1.ComponentSpec {
+	return v1alpha1.ComponentSpec{
+		RepositoryRef: corev1.LocalObjectReference{Name: d.GetName()},
+		Component:     d.Spec.Component,
+		Semver:        d.Spec.Semver,
+		SemverFilter:  d.Spec.SemverFilter,
+		OCMConfig:     d.Spec.OCMConfig,
+		Interval:      d.Spec.Interval,
+	}
+}
+
+// desiredResourceSpec maps the OCMDeployment's deploy resource onto its child
+// Resource.
+func desiredResourceSpec(d *v1alpha1.OCMDeployment) v1alpha1.ResourceSpec {
+	return v1alpha1.ResourceSpec{
+		ComponentRef: corev1.LocalObjectReference{Name: d.GetName()},
+		Resource:     d.Spec.DeployResource,
+		OCMConfig:    d.Spec.OCMConfig,
+	}
 }
 
 // childrenReady returns the child Component once Repository, Component and
