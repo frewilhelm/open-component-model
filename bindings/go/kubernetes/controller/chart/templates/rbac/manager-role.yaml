@@ -32,6 +32,7 @@ rules:
     resources:
       - components
       - deployers
+      - ocmdeployments
       - replications
       - repositories
       - resources
@@ -48,6 +49,7 @@ rules:
     resources:
       - components/finalizers
       - deployers/finalizers
+      - ocmdeployments/finalizers
       - replications/finalizers
       - repositories/finalizers
     verbs:
@@ -58,6 +60,7 @@ rules:
       - components/status
       - deployers/status
       - discoveries/status
+      - ocmdeployments/status
       - replications/status
       - repositories/status
       - resources/status

@@ -33,6 +33,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/deployer"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/deployer/cache"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/deployer/dynamic"
+	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/deployment"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/discovery"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/replication"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/repository"
@@ -324,6 +325,17 @@ func main() {
 		MaxResourceSizeBytes: maxResourceSizeBytes,
 	}).SetupWithManager(ctx, mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Deployer")
+		os.Exit(1)
+	}
+	if err = (&deployment.Reconciler{
+		BaseReconciler: &ocm.BaseReconciler{
+			Client:           mgr.GetClient(),
+			Scheme:           mgr.GetScheme(),
+			EventRecorder:    eventsRecorder,
+			NewPluginManager: newPluginManager,
+		},
+	}).SetupWithManager(ctx, mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "OCMDeployment")
 		os.Exit(1)
 	}
 	if err = (&v1alpha1.Component{}).SetupWebhookWithManager(mgr); err != nil {
