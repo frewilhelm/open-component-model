@@ -159,6 +159,11 @@ func PrepareOCMComponent(ctx context.Context, name, componentConstructorPath, im
 		"--repository", ctfDir,
 		"--constructor", componentConstructorPath,
 	)
+	// Only deployment examples consume the localization labels; keep other fixtures' descriptors
+	// identical to what users get without the flag.
+	if strings.Contains(name, "deployment") {
+		cmd.Args = append(cmd.Args, "--localize-hints")
+	}
 	// OCM's dir/v1 input resolves paths relative to the process CWD (not the
 	// constructor's working directory), so run add cv from the example dir.
 	cmd.Dir = exampleDir
@@ -213,11 +218,11 @@ func PrepareOCMComponent(ctx context.Context, name, componentConstructorPath, im
 	By("transferring ocm component for " + name)
 	cmd = exec.CommandContext(ctx, ocm, "transfer", "cv", transferRef, imageRegistry)
 
-	if strings.Contains(name, "nested") {
+	if strings.Contains(name, "nested") || strings.Contains(name, "deployment") {
 		cmd.Args = append(cmd.Args, "--recursive")
 	}
 
-	if strings.Contains(name, "localization") {
+	if strings.Contains(name, "localization") || strings.Contains(name, "deployment") {
 		uploaderConfigPath := filepath.Join(tmpDir, "oci-uploader.ocmconfig")
 		uploaderConfig := "type: generic.config.ocm.software/v1\nconfigurations:\n- type: oci.uploader.transfer.config.ocm.software/v1alpha1\n"
 		if err := os.WriteFile(uploaderConfigPath, []byte(uploaderConfig), 0o600); err != nil {
@@ -428,4 +433,35 @@ func GetResourceField(ctx context.Context, resource, fieldSelector string) (stri
 
 	result := strings.Trim(strings.TrimSpace(string(output)), "'")
 	return result, nil
+}
+
+// WaitForDeploymentAvailable waits for a Deployment to exist and become available.
+// kubectl wait --for=condition=available exits immediately with NotFound if the
+// Deployment does not exist yet; this helper polls until it does, then waits.
+func WaitForDeploymentAvailable(ctx context.Context, name, namespace, timeout string) error {
+	deadline, ok := ctx.Deadline()
+	var remaining time.Duration
+	if ok {
+		remaining = time.Until(deadline)
+	} else {
+		remaining = 5 * time.Minute
+	}
+
+	// Poll until the Deployment exists.
+	pollCtx, cancel := context.WithTimeout(ctx, remaining)
+	defer cancel()
+
+	for {
+		checkCmd := exec.CommandContext(pollCtx, "kubectl", "get", "deployment/"+name, "-n", namespace) //nolint:gosec // name and namespace are test-controlled values
+		if _, err := Run(checkCmd); err == nil {
+			break
+		}
+		select {
+		case <-pollCtx.Done():
+			return fmt.Errorf("deployment/%s in namespace %s did not appear before deadline", name, namespace)
+		case <-time.After(3 * time.Second):
+		}
+	}
+
+	return WaitForResource(ctx, "condition=available", timeout, "deployment/"+name, "-n", namespace)
 }

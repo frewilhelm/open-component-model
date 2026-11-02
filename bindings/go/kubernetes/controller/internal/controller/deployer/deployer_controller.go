@@ -40,6 +40,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/deployer/cache"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/deployer/dynamic"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/event"
+	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/limitedreader"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/ocm"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/resolution"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/setup"
@@ -710,7 +711,7 @@ func (r *Reconciler) DownloadResourceWithOCM(
 			}
 		}
 
-		limitedReader = &limitedReadCloser{Closer: limitedReader, limited: &io.LimitedReader{R: limitedReader, N: r.MaxResourceSizeBytes}}
+		limitedReader = limitedreader.New(limitedReader, r.MaxResourceSizeBytes)
 	}
 
 	return decodeObjectsFromManifest(limitedReader)

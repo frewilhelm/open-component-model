@@ -129,3 +129,32 @@ func TestIsRelativeOCIReference(t *testing.T) {
 		})
 	}
 }
+
+// TestIsOCIImageType verifies the narrow-scheme OCI image type classifier: all canonical and
+// legacy OCI image type names (versioned and unversioned) return true; unrelated types and the
+// empty string return false.
+func TestIsOCIImageType(t *testing.T) {
+	r := require.New(t)
+
+	for _, s := range []string{
+		"OCIImage", "OCIImage/v1",
+		"ociArtifact", "ociArtifact/v1",
+		"ociRegistry", "ociRegistry/v1",
+		"ociImage", "ociImage/v1",
+	} {
+		typ, err := runtime.TypeFromString(s)
+		r.NoError(err)
+		r.Truef(oci.IsOCIImageType(typ), "expected true for %q", s)
+	}
+
+	for _, s := range []string{"helmChart", "blob", "OCIImageLayer", "relativeOciReference"} {
+		typ, err := runtime.TypeFromString(s)
+		r.NoError(err)
+		r.Falsef(oci.IsOCIImageType(typ), "expected false for %q", s)
+	}
+
+	// Empty string: TypeFromString returns an error; the zero Type{} is not registered.
+	_, err := runtime.TypeFromString("")
+	r.Error(err)
+	r.False(oci.IsOCIImageType(runtime.Type{}))
+}

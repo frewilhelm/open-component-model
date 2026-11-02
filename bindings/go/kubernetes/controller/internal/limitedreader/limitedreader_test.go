@@ -1,4 +1,4 @@
-package deployer
+package limitedreader
 
 import (
 	"bytes"
@@ -20,12 +20,9 @@ type nopCloser struct{ io.Reader }
 
 func (nopCloser) Close() error { return nil }
 
-func TestLimitedReadCloser_UnderLimit(t *testing.T) {
+func TestReadCloser_UnderLimit(t *testing.T) {
 	data := []byte("hello")
-	rc := &limitedReadCloser{
-		Closer:  nopCloser{},
-		limited: &io.LimitedReader{R: bytes.NewReader(data), N: 10},
-	}
+	rc := New(nopCloser{bytes.NewReader(data)}, 10)
 
 	got, err := readAll(t, rc)
 	if err != nil {
@@ -36,12 +33,9 @@ func TestLimitedReadCloser_UnderLimit(t *testing.T) {
 	}
 }
 
-func TestLimitedReadCloser_ExactlyAtLimit(t *testing.T) {
+func TestReadCloser_ExactlyAtLimit(t *testing.T) {
 	data := []byte("hello")
-	rc := &limitedReadCloser{
-		Closer:  nopCloser{},
-		limited: &io.LimitedReader{R: bytes.NewReader(data), N: int64(len(data))},
-	}
+	rc := New(nopCloser{bytes.NewReader(data)}, int64(len(data)))
 
 	got, err := readAll(t, rc)
 	if err != nil {
@@ -52,12 +46,9 @@ func TestLimitedReadCloser_ExactlyAtLimit(t *testing.T) {
 	}
 }
 
-func TestLimitedReadCloser_OneByteOverLimit(t *testing.T) {
+func TestReadCloser_OneByteOverLimit(t *testing.T) {
 	data := []byte("hello!")
-	rc := &limitedReadCloser{
-		Closer:  nopCloser{},
-		limited: &io.LimitedReader{R: bytes.NewReader(data), N: int64(len(data)) - 1},
-	}
+	rc := New(nopCloser{bytes.NewReader(data)}, int64(len(data))-1)
 
 	_, err := readAll(t, rc)
 	if err == nil {
@@ -68,12 +59,9 @@ func TestLimitedReadCloser_OneByteOverLimit(t *testing.T) {
 	}
 }
 
-func TestLimitedReadCloser_MultipleReadsAtLimit(t *testing.T) {
+func TestReadCloser_MultipleReadsAtLimit(t *testing.T) {
 	data := bytes.Repeat([]byte("x"), 100)
-	rc := &limitedReadCloser{
-		Closer:  nopCloser{},
-		limited: &io.LimitedReader{R: bytes.NewReader(data), N: int64(len(data))},
-	}
+	rc := New(nopCloser{bytes.NewReader(data)}, int64(len(data)))
 
 	// Read in small chunks
 	buf := make([]byte, 7)

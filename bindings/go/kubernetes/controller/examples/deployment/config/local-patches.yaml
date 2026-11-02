@@ -1,0 +1,11 @@
+# Local/per-instance kustomize configuration — passed through as patches.
+# Mirrors config/local-values.yaml (the Helm local-config): it scales replicas to 2.
+# Applied after central-patches; inline spec.config applies last.
+patches:
+  - target:
+      kind: Deployment
+      name: podinfo
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2

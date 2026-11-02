@@ -33,6 +33,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/deployer"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/deployer/cache"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/deployer/dynamic"
+	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/deployment"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/discovery"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/replication"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/controller/repository"
@@ -49,6 +50,8 @@ const (
 	// etcd's default --max-request-bytes is 1.5 MiB (https://etcd.io/docs/v3.5/dev-guide/limit/),
 	// so a multi-document manifest written to the cluster will always stay well under 2 MiB.
 	defaultMaxResourceSize = "2Mi"
+	// defaultDeploymentMaxResourceSize is a generous upper bound for deploy artifacts (Helm charts, kustomize tarballs).
+	defaultDeploymentMaxResourceSize = "5Mi"
 )
 
 var (
@@ -100,6 +103,11 @@ func main() {
 		namespacedDeployerRateLimitQPS string
 		enableDeployer                 bool
 		enableNamespacedDeployer       bool
+		enableOCMDeployment            bool
+		ocmDeploymentConcurrency       int
+		ocmDeploymentMaxResourceSize   string
+		ocmDeploymentRateLimit         ocm.RateLimit
+		ocmDeploymentRateLimitQPS      string
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
@@ -164,6 +172,16 @@ func main() {
 		"Run the controller for the cluster-scoped Deployer.")
 	flag.BoolVar(&enableNamespacedDeployer, "enable-namespaced-deployer", true,
 		"Run the controller for the NamespacedDeployer.")
+	flag.BoolVar(&enableOCMDeployment, "enable-ocmdeployment", true,
+		"Run the controller for OCMDeployment.")
+	flag.IntVar(&ocmDeploymentConcurrency, "ocmdeployment-controller-concurrency", 4, //nolint:mnd // no magic number
+		"The OCMDeployment controller concurrency.")
+	flag.StringVar(&ocmDeploymentMaxResourceSize, "ocmdeployment-download-max-resource-size", defaultDeploymentMaxResourceSize,
+		"Maximum size of a single downloadable resource for the OCMDeployment controller as a Kubernetes resource.Quantity (e.g. \"5Mi\"). \"0\" disables the limit.")
+	flag.StringVar(&ocmDeploymentRateLimitQPS, "ocmdeployment-controller-rate-limit-qps", strconv.Itoa(ocm.DefaultRateLimitQPS),
+		"Requeues per second the OCMDeployment controller admits once its burst is used up. Must be a float greater than 0, e.g. 0.1.")
+	flag.IntVar(&ocmDeploymentRateLimit.Burst, "ocmdeployment-controller-rate-limit-burst", ocm.DefaultRateLimitBurst,
+		"Requeues the OCMDeployment controller admits at once before its qps applies. Must be at least 1.")
 
 	opts := zap.Options{
 		Development: true,
@@ -182,6 +200,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	deploymentMaxResourceQuantity, err := apiresource.ParseQuantity(ocmDeploymentMaxResourceSize)
+	if err != nil {
+		setupLog.Error(err, "invalid flag value", "flag", "ocmdeployment-download-max-resource-size", "value", ocmDeploymentMaxResourceSize)
+		os.Exit(1)
+	}
+	deploymentMaxResourceSizeBytes := deploymentMaxResourceQuantity.Value()
+	if deploymentMaxResourceSizeBytes < 0 {
+		setupLog.Error(nil, "invalid flag value", "flag", "ocmdeployment-download-max-resource-size", "value", ocmDeploymentMaxResourceSize, "reason", "must be >= 0")
+		os.Exit(1)
+	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	// A qps of 0 would stop a controller for good once its burst is used up.
@@ -209,6 +237,7 @@ func main() {
 	discoveryRateLimit.QPS = parseRateLimit("discovery", discoveryRateLimitQPS, discoveryRateLimit.Burst)
 	deployerRateLimit.QPS = parseRateLimit("deployer", deployerRateLimitQPS, deployerRateLimit.Burst)
 	namespacedDeployerRateLimit.QPS = parseRateLimit("namespaced-deployer", namespacedDeployerRateLimitQPS, namespacedDeployerRateLimit.Burst)
+	ocmDeploymentRateLimit.QPS = parseRateLimit("ocmdeployment", ocmDeploymentRateLimitQPS, ocmDeploymentRateLimit.Burst)
 	setupLog.Info("FIPS 140-3 mode", "enabled", fips140.Enabled(), "module", fips140.Version())
 
 	ctx := context.Background()
@@ -391,6 +420,24 @@ func main() {
 			setupLog.Error(err, "unable to create controller", "controller", d.kind)
 			os.Exit(1)
 		}
+	}
+	if enableOCMDeployment {
+		if err = (&deployment.Reconciler{
+			BaseReconciler: &ocm.BaseReconciler{
+				Client:           mgr.GetClient(),
+				Scheme:           mgr.GetScheme(),
+				EventRecorder:    eventsRecorder,
+				NewPluginManager: newPluginManager,
+				RateLimit:        ocmDeploymentRateLimit,
+			},
+			Resolver:             resolver,
+			MaxResourceSizeBytes: deploymentMaxResourceSizeBytes,
+		}).SetupWithManager(ctx, mgr, ocmDeploymentConcurrency); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "OCMDeployment")
+			os.Exit(1)
+		}
+	} else {
+		setupLog.Info("controller disabled", "controller", "OCMDeployment")
 	}
 	if err = (&v1alpha1.Component{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "Component")

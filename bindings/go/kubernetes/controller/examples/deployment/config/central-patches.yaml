@@ -1,0 +1,13 @@
+# Central kustomize configuration — passed through as Kustomization/Application patches.
+# Mirrors config/central-values.yaml (the Helm central-config): it injects the UI message.
+# configResources are applied in spec order (central first), then inline spec.config last.
+patches:
+  - target:
+      kind: Deployment
+      name: podinfo
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: PODINFO_UI_MESSAGE
+            value: "Hello from the central config component"

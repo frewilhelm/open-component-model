@@ -31,6 +31,7 @@ const (
 var ignoreExamples = map[string]struct{}{
 	"applyset-pruning":   {}, // tested in e2e_applyset_test.go
 	"replication-simple": {}, // tested in e2e_replication_test.go
+	"deployment":         {}, // tested in e2e_deployment_test.go
 }
 
 var _ = Describe("controller", func() {

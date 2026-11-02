@@ -1,0 +1,5 @@
+# Central configuration — merged before local-config and inline config.
+# Precedence (highest last): chart defaults → localization → central-config → local-config → inline config
+ui:
+  message: "Hello from the central config component"
+  color: "#111111"

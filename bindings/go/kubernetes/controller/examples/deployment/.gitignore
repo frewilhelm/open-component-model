@@ -1,0 +1,2 @@
+# oci-layout/ is built by the e2e harness (buildKustomizeOCILayout) from kustomize/.
+oci-layout/

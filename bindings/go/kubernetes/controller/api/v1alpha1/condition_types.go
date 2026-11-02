@@ -79,6 +79,14 @@ const (
 
 	// TransferCompleteReason is used when no Replication transfer is done.
 	TransferCompleteReason = "TransferComplete"
+
+	// OCMDeploymentUnsupportedConfigurationReason is used when OCMDeployment receives configuration
+	// that cannot be applied, e.g. a kustomize config/configResources source without a valid 'patches' list.
+	OCMDeploymentUnsupportedConfigurationReason = "UnsupportedConfiguration"
+
+	// ResolutionInProgress is used when the OCMDeployment is waiting for child Resource CRs to
+	// finish resolving their coordinates before rendering can proceed.
+	ResolutionInProgress = "ResolutionInProgress"
 )
 
 // Discovery condition reasons.

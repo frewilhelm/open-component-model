@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: podinfo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: podinfo
+  template:
+    metadata:
+      labels:
+        app: podinfo
+    spec:
+      containers:
+        - name: podinfo
+          # This image reference is matched by the podinfo-image localization label.
+          # The controller substitutes it with the relocated registry location.
+          image: ghcr.io/stefanprodan/podinfo:6.9.1
+          ports:
+            - containerPort: 9898

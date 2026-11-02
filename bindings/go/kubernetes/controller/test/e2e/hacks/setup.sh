@@ -154,6 +154,7 @@ install_argocd() {
   # manager keeps this key across its server-side apply.
   kubectl -n argocd create configmap argocd-cmd-params-cm \
       --from-literal=reposerver.oci.layer.media.types="application/vnd.oci.image.layer.v1.tar,application/vnd.oci.image.layer.v1.tar+gzip,application/vnd.cncf.helm.chart.content.v1.tar+gzip,application/vnd.cncf.flux.content.v1.tar+gzip" \
+      --from-literal=application.namespaces="*" \
       --dry-run=client -o yaml | kubectl apply --server-side --field-manager=ocm-e2e-setup -f - || return 1
 
   # Core install (application-controller, repo-server, redis, applicationset-controller): specs only need
@@ -176,6 +177,9 @@ metadata:
   namespace: argocd
 spec:
   sourceRepos: ["*"]
+  # Allow Applications in any namespace to reference this project (apps-in-any-namespace).
+  # Required for OCMDeployment variants that place their Application outside the argocd namespace.
+  sourceNamespaces: ["*"]
   destinations:
     - server: "*"
       namespace: "*"

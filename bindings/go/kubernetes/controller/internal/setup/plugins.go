@@ -16,6 +16,7 @@ import (
 	githubrepository "ocm.software/open-component-model/bindings/go/github/repository/resource"
 	gpghandler "ocm.software/open-component-model/bindings/go/gpg/signing/handler"
 	helmdigest "ocm.software/open-component-model/bindings/go/helm/digest"
+	helmres "ocm.software/open-component-model/bindings/go/helm/repository/resource"
 	httpclient "ocm.software/open-component-model/bindings/go/http"
 	httpv1alpha1 "ocm.software/open-component-model/bindings/go/http/spec/config/v1alpha1"
 	ocicache "ocm.software/open-component-model/bindings/go/oci/cache"
@@ -131,6 +132,11 @@ func NewPluginManager(ctx context.Context, cfg *genericv1.Config, logger *slog.L
 
 	helmDigestProcessor := helmdigest.NewDigestProcessor(options.TempDir, helmdigest.WithHTTPConfig(httpCfg))
 
+	helmResourceRepoPlugin := helmres.NewResourceRepository(
+		fsCfg,
+		helmres.WithHTTPConfig(httpCfg),
+	)
+
 	// Resources of these access types are downloaded to be verified, and by the Deployer.
 	httpClient := httpclient.New(httpclient.WithConfig(httpCfg))
 	gitRepository := gitrepository.NewResourceRepository(fsCfg, gitrepository.WithHTTPClient(httpClient))
@@ -149,6 +155,7 @@ func NewPluginManager(ctx context.Context, cfg *genericv1.Config, logger *slog.L
 			[]ocmruntime.Type{ociidentityv1.Type},
 		),
 		pm.ResourcePluginRegistry.RegisterInternalResourcePlugin(ociResourceRepoPlugin),
+		pm.ResourcePluginRegistry.RegisterInternalResourcePlugin(helmResourceRepoPlugin),
 		pm.DigestProcessorRegistry.RegisterInternalDigestProcessorPlugin(ociResourceRepoPlugin),
 		pm.DigestProcessorRegistry.RegisterInternalDigestProcessorPlugin(helmDigestProcessor),
 		pm.ResourcePluginRegistry.RegisterInternalResourcePlugin(gitRepository),

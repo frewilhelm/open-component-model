@@ -69,3 +69,29 @@ func IsRelativeOCIReference(access runtime.Typed) bool {
 	var rel v2.RelativeOCIReference
 	return relativeScheme.Convert(access, &rel) == nil
 }
+
+// ociImageScheme is a narrow scheme registering only the OCIImage type and all its legacy
+// aliases. It backs IsOCIImageType: probing the broad Scheme is avoided because that would
+// match OCIImageLayer and RelativeOCIReference too.
+var ociImageScheme = runtime.NewScheme()
+
+func init() {
+	ociImage := &v2.OCIImage{}
+	ociImageScheme.MustRegisterWithAlias(ociImage,
+		runtime.NewVersionedType(v2.OCIImageType, v2.Version),
+		runtime.NewUnversionedType(v2.OCIImageType),
+		runtime.NewVersionedType(v2.LegacyType, v2.LegacyTypeVersion),
+		runtime.NewUnversionedType(v2.LegacyType),
+		runtime.NewVersionedType(v2.LegacyType2, v2.LegacyType2Version),
+		runtime.NewUnversionedType(v2.LegacyType2),
+		runtime.NewVersionedType(v2.LegacyType3, v2.LegacyType3Version),
+		runtime.NewUnversionedType(v2.LegacyType3),
+	)
+}
+
+// IsOCIImageType reports whether typ identifies an OCI image type — the canonical
+// "OCIImage" or any of its legacy aliases ("ociArtifact", "ociRegistry", "ociImage"),
+// versioned or unversioned.
+func IsOCIImageType(typ runtime.Type) bool {
+	return ociImageScheme.IsRegistered(typ)
+}

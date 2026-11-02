@@ -1,0 +1,8 @@
+# Local/per-instance configuration — overrides central-config values.
+# redis.enabled: true causes the redis sub-chart to deploy, which means
+# redis-image must be localized (it appears in the rendered values).
+replicaCount: 2
+redis:
+  enabled: true
+ui:
+  color: "#222222"

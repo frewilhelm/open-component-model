@@ -51,6 +51,7 @@ const (
 	FlagComponentVersionConflictPolicy     = "component-version-conflict-policy"
 	FlagExternalComponentVersionCopyPolicy = "external-component-version-copy-policy"
 	FlagSkipReferenceDigestProcessing      = "skip-reference-digest-processing"
+	FlagLocalizeHints                      = "localize-hints"
 	FlagOutput                             = "output"
 	FlagDisplayMode                        = "display-mode"
 
@@ -238,6 +239,7 @@ add component-version --%[1]s ./archive --%[2]s %[3]s.yaml
 	cmd.Flags().Lookup(FlagComponentVersionConflictPolicy).Hidden = false
 	enum.Var(cmd.Flags(), FlagExternalComponentVersionCopyPolicy, ExternalComponentVersionCopyPolicies(), "policy to apply when a component reference to a component version outside of the constructor or target repository is encountered")
 	cmd.Flags().Bool(FlagSkipReferenceDigestProcessing, false, "skip digest processing for resources. Any resource referenced via access type will not have their digest updated.")
+	cmd.Flags().Bool(FlagLocalizeHints, false, "attach the ocm.software/localization label to OCI image resources that lack it, recording their pre-transfer coordinates for use by OCMDeployment controllers. Resources already carrying the label are skipped.")
 	enum.VarP(cmd.Flags(), FlagOutput, "o", []string{render.OutputFormatTable.String(), render.OutputFormatYAML.String(), render.OutputFormatJSON.String(), render.OutputFormatNDJSON.String(), render.OutputFormatTree.String()}, "output format of the component descriptors")
 	enum.VarP(cmd.Flags(), FlagDisplayMode, "", []string{render.StaticRenderMode, render.LiveRenderMode}, `static: print the output once the complete component graph is discovered
   live (experimental): continuously updates the output to represent the current construction state of the component graph`)
@@ -297,6 +299,11 @@ func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 	skipReferenceDigestProcessing, err := cmd.Flags().GetBool(FlagSkipReferenceDigestProcessing)
 	if err != nil {
 		return fmt.Errorf("getting skip-reference-digest-processing flag failed: %w", err)
+	}
+
+	localizeHints, err := cmd.Flags().GetBool(FlagLocalizeHints)
+	if err != nil {
+		return fmt.Errorf("getting localize-hints flag failed: %w", err)
 	}
 
 	cvConflictPolicy, err := enum.Get(cmd.Flags(), FlagComponentVersionConflictPolicy)
@@ -393,6 +400,9 @@ func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 	}
 	if !skipReferenceDigestProcessing {
 		opts.ResourceDigestProcessorProvider = instance
+	}
+	if localizeHints {
+		opts.OnEndResourceConstruct = attachLocalizationLabel
 	}
 
 	constr := constructor.NewDefaultConstructor(constructorSpec, opts)

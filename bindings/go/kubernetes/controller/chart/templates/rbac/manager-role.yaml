@@ -34,11 +34,21 @@ rules:
     verbs:
       - create
   - apiGroups:
+      - argoproj.io
+    resources:
+      - applications
+    verbs:
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
       - delivery.ocm.software
     resources:
       - components
       - deployers
       - namespaceddeployers
+      - ocmdeployments
       - replications
       - repositories
       - resources
@@ -56,6 +66,7 @@ rules:
       - components/finalizers
       - deployers/finalizers
       - namespaceddeployers/finalizers
+      - ocmdeployments/finalizers
       - replications/finalizers
       - repositories/finalizers
     verbs:
@@ -67,6 +78,7 @@ rules:
       - deployers/status
       - discoveries/status
       - namespaceddeployers/status
+      - ocmdeployments/status
       - replications/status
       - repositories/status
       - resources/status
@@ -81,4 +93,32 @@ rules:
     verbs:
       - get
       - list
+      - watch
+  - apiGroups:
+      - helm.toolkit.fluxcd.io
+    resources:
+      - helmreleases
+    verbs:
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - kustomize.toolkit.fluxcd.io
+    resources:
+      - kustomizations
+    verbs:
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - source.toolkit.fluxcd.io
+    resources:
+      - helmrepositories
+      - ocirepositories
+    verbs:
+      - get
+      - list
+      - patch
       - watch

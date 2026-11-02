@@ -1,0 +1,99 @@
+components:
+  - name: ocm.software/ocm-k8s-toolkit/examples/deployment
+    version: 1.0.0
+    provider:
+      name: ocm.software
+    componentReferences:
+      - name: central-config
+        componentName: ocm.software/ocm-k8s-toolkit/examples/deployment/central-config
+        version: 1.0.0
+    resources:
+      # Helm chart artifact for Flux/Argo Helm engine
+      - name: podinfo-chart
+        type: helmChart
+        version: 1.0.0
+        relation: external
+        access:
+          type: ociArtifact
+          imageReference: ghcr.io/stefanprodan/charts/podinfo:6.9.1
+
+      # Kustomize OCI layout artifact built from ./kustomize/ by the e2e harness
+      - name: podinfo-kustomize
+        type: ociArtifact
+        version: 1.0.0
+        relation: local
+        input:
+          type: dir/v1
+          path: ./oci-layout
+          mediaType: application/vnd.ocm.software.oci.layout.v1+tar
+
+      # Image resources — carry ocm.software/localization labels via --localize-hints
+      - name: podinfo-image
+        type: ociImage
+        version: 1.0.0
+        relation: external
+        access:
+          type: ociArtifact
+          imageReference: ghcr.io/stefanprodan/podinfo:6.9.1
+
+      - name: redis-image
+        type: ociImage
+        version: 1.0.0
+        relation: external
+        access:
+          type: ociArtifact
+          imageReference: docker.io/library/redis:7.0.7
+
+      # Labelled but not referenced in chart values — proves the controller skips it
+      - name: unused-image
+        type: ociImage
+        version: 1.0.0
+        relation: external
+        access:
+          type: ociArtifact
+          imageReference: docker.io/library/busybox:1.36
+
+      # Per-instance local configuration (replicaCount, redis.enabled, ui.color)
+      - name: local-config
+        type: yaml
+        version: 1.0.0
+        relation: local
+        input:
+          type: file/v1
+          path: ./config/local-values.yaml
+          mediaType: application/yaml
+
+      # Per-instance kustomize patch config (replicas) — mirrors local-config for the kustomize path
+      - name: local-patches
+        type: yaml
+        version: 1.0.0
+        relation: local
+        input:
+          type: file/v1
+          path: ./config/local-patches.yaml
+          mediaType: application/yaml
+
+  # Central configuration component (shared across environments)
+  - name: ocm.software/ocm-k8s-toolkit/examples/deployment/central-config
+    version: 1.0.0
+    provider:
+      name: ocm.software
+    resources:
+      - name: central-config
+        type: yaml
+        version: 1.0.0
+        relation: local
+        input:
+          type: file/v1
+          path: ./config/central-values.yaml
+          mediaType: application/yaml
+
+      # Central kustomize patch config (UI message) — mirrors central-config for the kustomize path
+      - name: central-patches
+        type: yaml
+        version: 1.0.0
+        relation: local
+        input:
+          type: file/v1
+          path: ./config/central-patches.yaml
+          mediaType: application/yaml

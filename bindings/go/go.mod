@@ -22,6 +22,7 @@ require (
 	github.com/cyberphone/json-canonicalization v0.0.0-20241213102144-19d51d7fe467
 	github.com/digitorus/pkcs7 v0.0.0-20260914070511-d678ea5ea03f
 	github.com/digitorus/timestamp v0.0.0-20260914073129-b4b58b92aa51
+	github.com/distribution/reference v0.6.0
 	github.com/docker/cli v29.8.1+incompatible
 	github.com/gabriel-vasile/mimetype v1.4.15
 	github.com/go-git/go-git/v6 v6.0.0-alpha.5
@@ -105,7 +106,6 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/distribution/reference v0.6.0 // indirect
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/docker/docker-credential-helpers v0.9.9 // indirect
 	github.com/docker/go-connections v0.8.1 // indirect

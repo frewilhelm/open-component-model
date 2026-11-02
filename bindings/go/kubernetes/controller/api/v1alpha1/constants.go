@@ -27,4 +27,6 @@ const (
 	RepositoryFinalizer = "finalizers.ocm.software/repository"
 	// ReplicationFinalizer makes sure that an in-flight transfer is drained before the Replication is removed.
 	ReplicationFinalizer = "finalizers.ocm.software/replication"
+	// OCMDeploymentFinalizer ensures the applyset members are pruned before the OCMDeployment is removed.
+	OCMDeploymentFinalizer = "finalizers.ocm.software/ocmdeployment"
 )

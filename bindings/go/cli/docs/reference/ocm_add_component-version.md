@@ -125,6 +125,7 @@ add component-version --repository ./archive --constructor component-constructor
       --external-component-version-copy-policy enum   policy to apply when a component reference to a component version outside of the constructor or target repository is encountered
                                                       (must be one of [copy-or-fail skip]) (default skip)
   -h, --help                                          help for component-version
+      --localize-hints                                attach the ocm.software/localization label to OCI image resources that lack it, recording their pre-transfer coordinates for use by OCMDeployment controllers. Resources already carrying the label are skipped.
   -o, --output enum                                   output format of the component descriptors
                                                       (must be one of [json ndjson table tree yaml]) (default table)
   -r, --repository string                             repository ref (default "transport-archive")
