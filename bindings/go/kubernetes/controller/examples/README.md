@@ -21,7 +21,8 @@ See the [installation notes in the root README](../README.md#installation) for d
 |---|---|---|
 | [`helm-simple`](#helm-simple) | FluxCD + ArgoCD | Minimal Helm chart deploy from an OCI artifact |
 | [`helm-nested`](#helm-nested) | FluxCD + ArgoCD | Helm chart buried in a nested OCM component reference |
-| [`discovery-resources`](#discovery-resources) | FluxCD + ArgoCD | kro generates a `Resource` from a `Discovery`'s extracted `referencePath` |
+| [`discovery-resources`](#discovery-resources) | FluxCD | kro generates a verified `Resource` per chart from a `Discovery`'s extracted `referencePath` |
+| [`discovery-localization`](#discovery-localization) | FluxCD | Charts in another repository, resolved references read from `Resource` status, localized images |
 | [`helm-nested-signed`](#helm-nested-signed) | FluxCD + ArgoCD | Nested component with signature verification |
 | [`helm-signing`](#helm-signing) | FluxCD + ArgoCD | Deploying a signed Helm chart with key verification |
 | [`helm-simple-nested-status`](#helm-simple-nested-status) | FluxCD + ArgoCD | Exposing nested resource status fields through `additionalStatusFields` |
@@ -106,6 +107,42 @@ loop, because it deploys multiple charts rather than a single `<example>-podinfo
 ```bash
 # Run this example in isolation
 task test/e2e -- --focus="Discovery Reference Path"
+```
+
+---
+
+## discovery-localization
+
+**Deployer:** FluxCD (one `OCIRepository` + `HelmRelease` per discovered chart)
+
+The component versions are split across two repositories: the root, `rgd` and `platform` components live in
+repository A, the chart components in repository B (`subPath: discovery-localization-charts`). A
+`resolvers.config.ocm.software/v1alpha1` configuration in a ConfigMap routes the chart component names to
+repository B; the `Component` references it with `policy: Propagate`, so the `Discovery` objects and the
+generated `Resource` objects inherit it.
+
+`chart-a` carries two images and `chart-b` one. Two `Discovery` objects extract the charts and the images,
+and kro generates a verified `Resource` for every chart and every image. The actual artifact reference is
+read from the `Resource` status:
+
+```yaml
+additionalStatusFields:
+  reference: resource.access.imageReference
+```
+
+Because the charts were transferred with `--copy-resources`, these references point at the local registry,
+not at `ghcr.io`. The example uses them twice: a ConfigMap per chart collects the references of all its images,
+however many there are, and each `HelmRelease` localizes the image it deploys to the resolved reference.
+
+`status.component.repositorySpec` of a `Resource` reached through a reference path shows the repository of
+the root component, not the repository the nested component was resolved from. Use the resolved access
+reference to locate the artifact.
+
+This example has its own e2e test (`test/e2e/e2e_discovery_localization_test.go`) because its component
+versions are transferred to two repositories.
+
+```bash
+task test/e2e -- --focus="Cross-Repository Localization"
 ```
 
 ---

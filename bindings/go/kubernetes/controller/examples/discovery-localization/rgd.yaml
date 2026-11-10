@@ -1,0 +1,146 @@
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: discovery-localization
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: DiscoveryLocalization
+    spec:
+      prefix: string | default="discovery-localization"
+  resources:
+    # Discovery of the charts: one record per chart, named by the reference-path
+    # leaf (chart-a / chart-b).
+    - id: chartDiscovery
+      readyWhen:
+        - ${chartDiscovery.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
+      template:
+        apiVersion: delivery.ocm.software/v1alpha1
+        kind: Discovery
+        metadata:
+          name: "${schema.spec.prefix}-charts"
+        spec:
+          componentRef:
+            name: discovery-localization-component
+          resourceSelector:
+            matchIdentity:
+              name: helm-resource
+          extract:
+            byResources:
+              slug: referencePath[size(referencePath) - 1].name
+              resource: '{"name": resource.name}'
+              referencePath: referencePath
+    # Discovery of the images: any number per chart. Each record names the chart
+    # it belongs to, so the images can be matched to their chart below.
+    - id: imageDiscovery
+      readyWhen:
+        - ${imageDiscovery.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
+      template:
+        apiVersion: delivery.ocm.software/v1alpha1
+        kind: Discovery
+        metadata:
+          name: "${schema.spec.prefix}-images"
+        spec:
+          componentRef:
+            name: discovery-localization-component
+          resourceSelector:
+            expression: identity.name.startsWith("image-")
+          extract:
+            byResources:
+              slug: referencePath[size(referencePath) - 1].name + "-" + resource.name
+              resource: '{"name": resource.name}'
+              referencePath: referencePath
+    # One verified Resource per chart and per image. The status of each Resource
+    # carries the actual, resolved reference of the artifact.
+    - id: charts
+      forEach:
+        - rec: ${chartDiscovery.status.extracted}
+      template:
+        apiVersion: delivery.ocm.software/v1alpha1
+        kind: Resource
+        metadata:
+          name: ${schema.spec.prefix + '-' + rec.slug}
+        spec:
+          componentRef:
+            name: discovery-localization-component
+          resource:
+            byReference:
+              resource: ${rec.resource}
+              referencePath: ${rec.referencePath}
+          additionalStatusFields:
+            reference: resource.access.imageReference
+            registry: resource.access.toOCI().registry
+            repository: resource.access.toOCI().repository
+            digest: resource.access.toOCI().digest
+    - id: images
+      forEach:
+        - rec: ${imageDiscovery.status.extracted}
+      template:
+        apiVersion: delivery.ocm.software/v1alpha1
+        kind: Resource
+        metadata:
+          name: ${schema.spec.prefix + '-' + rec.slug}
+        spec:
+          componentRef:
+            name: discovery-localization-component
+          resource:
+            byReference:
+              resource: ${rec.resource}
+              referencePath: ${rec.referencePath}
+          additionalStatusFields:
+            reference: resource.access.imageReference
+            registry: resource.access.toOCI().registry
+            repository: resource.access.toOCI().repository
+            tag: resource.access.toOCI().tag
+    # Per chart, collect the resolved references of all its images from the
+    # Resource status, however many there are.
+    - id: imageReferences
+      forEach:
+        - chart: ${charts}
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${chart.metadata.name + '-images'}
+        data:
+          images: ${images.filter(i, i.metadata.name.startsWith(chart.metadata.name + '-image-')).map(i, i.status.additional.reference).join(",")}
+    # Deploy each chart with FluxCD and localize the image it deploys
+    # (image-podinfo) to the resolved reference from the image Resource status.
+    - id: ocirepositories
+      forEach:
+        - chart: ${charts}
+      template:
+        apiVersion: source.toolkit.fluxcd.io/v1
+        kind: OCIRepository
+        metadata:
+          name: ${chart.metadata.name + '-oci'}
+        spec:
+          interval: 1m0s
+          insecure: true
+          layerSelector:
+            mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+            operation: copy
+          url: oci://${chart.status.additional.registry}/${chart.status.additional.repository}
+          ref:
+            digest: ${chart.status.additional.digest}
+    - id: helmreleases
+      forEach:
+        - chart: ${charts}
+      template:
+        apiVersion: helm.toolkit.fluxcd.io/v2
+        kind: HelmRelease
+        metadata:
+          name: ${chart.metadata.name + '-hr'}
+        spec:
+          releaseName: ${chart.metadata.name}
+          interval: 1m
+          timeout: 5m
+          chartRef:
+            kind: OCIRepository
+            name: ${chart.metadata.name + '-oci'}
+            namespace: default
+          values:
+            # Localization
+            image:
+              repository: ${images.filter(i, i.metadata.name == chart.metadata.name + '-image-podinfo').map(i, i.status.additional.registry + '/' + i.status.additional.repository)[0]}
+              tag: ${images.filter(i, i.metadata.name == chart.metadata.name + '-image-podinfo').map(i, i.status.additional.tag)[0]}

@@ -92,6 +92,7 @@ rules:
       - basicauths
       - dockerconfigjsons
       - discoveryresources
+      - discoverylocalizations
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
   - apiGroups: ["kro.run"]
     resources:
@@ -117,10 +118,16 @@ rules:
       - dockerconfigjsons/finalizers
       - discoveryresources/status
       - discoveryresources/finalizers
+      - discoverylocalizations/status
+      - discoverylocalizations/finalizers
     verbs: ["get", "patch", "update"]
   # OCM resources and discoveries the RGDs declare (delivery.ocm.software/v1alpha1).
   - apiGroups: ["delivery.ocm.software"]
     resources: ["resources", "resources/status", "discoveries", "discoveries/status"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  # ConfigMaps the discovery-localization RGD creates to collect resolved references.
+  - apiGroups: [""]
+    resources: ["configmaps"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
   # FluxCD sources the RGDs create.
   - apiGroups: ["source.toolkit.fluxcd.io"]
