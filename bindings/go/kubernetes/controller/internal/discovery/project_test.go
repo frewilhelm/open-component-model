@@ -538,3 +538,46 @@ func TestProjectUnknownExtractMode(t *testing.T) {
 	r.ErrorAs(err, &extErr)
 	r.ErrorContains(err, "unknown extraction mode")
 }
+
+// TestProjectReferencePath proves the referencePath binding survives a selector
+// that drops the intermediate component, and is absent when the graph has no root.
+func TestProjectReferencePath(t *testing.T) {
+	r := require.New(t)
+
+	root := newDescriptor("r", "1", withReferences(newReference("mid", "mid", "1")))
+	mid := newDescriptor("mid", "1", withReferences(newReference("leaf", "leaf", "1")))
+	leaf := newDescriptor("leaf", "1", withResources(newResource("chart")))
+
+	spec := &v1alpha1.DiscoverySpec{
+		ComponentSelector: &v1alpha1.Selector{Expression: "identity.name == 'leaf'"},
+		Extract: &v1alpha1.Extract{ByResources: map[string]string{
+			"path":  "referencePath",
+			"first": "referencePath[0].name",
+			"res":   "resource.name",
+		}},
+	}
+
+	q, err := Compile(t.Context(), spec)
+	r.NoError(err)
+
+	withRoot, err := q.Filter(t.Context(), Graph{Root: key("r", "1"), Descriptors: []*descriptor.Descriptor{root, mid, leaf}})
+	r.NoError(err)
+	p, err := q.Project(t.Context(), withRoot)
+	r.NoError(err)
+	r.Len(p.Extracted, 1)
+	r.Equal("chart", p.Extracted[0]["res"])
+	r.Equal([]any{
+		map[string]any{"name": "mid"},
+		map[string]any{"name": "leaf"},
+	}, p.Extracted[0]["path"], "a dropped intermediate must not cut the path")
+	r.Equal("mid", p.Extracted[0]["first"], "indexing and attribute access into the path must work under DynType")
+
+	noRoot, err := q.Filter(t.Context(), Graph{Descriptors: []*descriptor.Descriptor{root, mid, leaf}})
+	r.NoError(err)
+	p, err = q.Project(t.Context(), noRoot)
+	r.NoError(err)
+	r.Len(p.Extracted, 1)
+	r.Equal("chart", p.Extracted[0]["res"])
+	_, ok := p.Extracted[0]["path"]
+	r.False(ok, "without a root no path is bound, so the field is omitted")
+}

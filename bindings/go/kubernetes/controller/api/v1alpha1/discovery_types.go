@@ -17,13 +17,22 @@ const KindDiscovery = "Discovery"
 type Extract struct {
 	// ByResources evaluates each map value as a CEL expression once per
 	// surviving (component, resource) pair with the bindings component and
-	// resource. An explicitly empty map emits one empty record per pair.
+	// resource. The binding referencePath holds the shortest component
+	// reference path from the root component, usable as a Resource's
+	// spec.resource.byReference.referencePath: a list of reference identities
+	// (name and extraIdentity, version only when needed to disambiguate), empty
+	// for the root component. An explicitly empty map emits one empty record
+	// per pair.
 	// +optional
 	ByResources map[string]string `json:"byResources,omitzero"`
 
 	// ByComponents evaluates each map value as a CEL expression once per
-	// surviving component with the binding component. An explicitly empty map
-	// emits one empty record per component.
+	// surviving component with the binding component. The binding referencePath
+	// holds the shortest component reference path from the root component,
+	// usable as a Resource's spec.resource.byReference.referencePath: a list of
+	// reference identities (name and extraIdentity, version only when needed to
+	// disambiguate), empty for the root component. An explicitly empty map emits
+	// one empty record per component.
 	// +optional
 	ByComponents map[string]string `json:"byComponents,omitzero"`
 

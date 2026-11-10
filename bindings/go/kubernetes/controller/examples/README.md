@@ -21,6 +21,7 @@ See the [installation notes in the root README](../README.md#installation) for d
 |---|---|---|
 | [`helm-simple`](#helm-simple) | FluxCD + ArgoCD | Minimal Helm chart deploy from an OCI artifact |
 | [`helm-nested`](#helm-nested) | FluxCD + ArgoCD | Helm chart buried in a nested OCM component reference |
+| [`discovery-resources`](#discovery-resources) | FluxCD + ArgoCD | kro generates a `Resource` from a `Discovery`'s extracted `referencePath` |
 | [`helm-nested-signed`](#helm-nested-signed) | FluxCD + ArgoCD | Nested component with signature verification |
 | [`helm-signing`](#helm-signing) | FluxCD + ArgoCD | Deploying a signed Helm chart with key verification |
 | [`helm-simple-nested-status`](#helm-simple-nested-status) | FluxCD + ArgoCD | Exposing nested resource status fields through `additionalStatusFields` |
@@ -74,6 +75,30 @@ resource:
       name: helm-resource
     referencePath:
       - name: nested-chart
+```
+
+---
+
+## discovery-resources
+
+**Deployers:** FluxCD + ArgoCD
+
+Like `helm-nested`, but the chart `Resource` is not hand-written. A `Discovery` extracts one record per matching
+resource, including the `referencePath` of the nested component that owns it, and a kro `forEach` turns each
+record into a `Resource`. The generated `Resource` is what performs verification (root signature, every
+reference-path digest, and the resource digest); the `Discovery` itself is read-only and verifies nothing.
+
+```yaml
+extract:
+  byResources:
+    name: '(component.name + "-" + resource.name).replace("/", "-").replace(".", "-")'
+    resource: '{"name": resource.name}'
+    referencePath: referencePath
+```
+
+```bash
+# Run this example in isolation
+task test/e2e -- --focus=discovery-resources
 ```
 
 ---

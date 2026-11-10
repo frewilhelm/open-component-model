@@ -91,6 +91,7 @@ rules:
       - kustomizesimples
       - basicauths
       - dockerconfigjsons
+      - discoveryresources
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
   - apiGroups: ["kro.run"]
     resources:
@@ -114,10 +115,12 @@ rules:
       - kustomizesimples/finalizers
       - basicauths/finalizers
       - dockerconfigjsons/finalizers
+      - discoveryresources/status
+      - discoveryresources/finalizers
     verbs: ["get", "patch", "update"]
-  # OCM resources the RGDs declare (delivery.ocm.software/v1alpha1 Resource).
+  # OCM resources and discoveries the RGDs declare (delivery.ocm.software/v1alpha1).
   - apiGroups: ["delivery.ocm.software"]
-    resources: ["resources", "resources/status"]
+    resources: ["resources", "resources/status", "discoveries", "discoveries/status"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
   # FluxCD sources the RGDs create.
   - apiGroups: ["source.toolkit.fluxcd.io"]

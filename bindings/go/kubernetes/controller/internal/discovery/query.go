@@ -138,7 +138,11 @@ func compileExtract(ctx context.Context, base *cel.Env, extract *v1alpha1.Extrac
 
 	switch {
 	case extract.ByResources != nil:
-		env, err := base.Extend(cel.Variable("component", cel.DynType), cel.Variable("resource", cel.DynType))
+		env, err := base.Extend(
+			cel.Variable("component", cel.DynType),
+			cel.Variable("resource", cel.DynType),
+			cel.Variable("referencePath", cel.DynType),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extend base CEL environment: %w", err)
 		}
@@ -148,7 +152,10 @@ func compileExtract(ctx context.Context, base *cel.Env, extract *v1alpha1.Extrac
 		}
 		return &compiledExtract{mode: extractByResources, fields: fields}, nil
 	case extract.ByComponents != nil:
-		env, err := base.Extend(cel.Variable("component", cel.DynType))
+		env, err := base.Extend(
+			cel.Variable("component", cel.DynType),
+			cel.Variable("referencePath", cel.DynType),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extend base CEL environment: %w", err)
 		}
