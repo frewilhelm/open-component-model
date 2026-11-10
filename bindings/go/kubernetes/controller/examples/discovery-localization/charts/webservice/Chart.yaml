@@ -1,0 +1,6 @@
+apiVersion: v2
+name: webservice
+description: A minimal chart whose image lives under a non-standard values path, to show localization works for any chart layout.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

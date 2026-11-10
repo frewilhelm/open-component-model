@@ -89,8 +89,8 @@ two nested chart components (`chart-a` pinning podinfo 6.9.1, `chart-b` pinning 
 `helm-resource`. A `Discovery` extracts one record per matching resource — including the `referencePath` of the
 nested component that owns it — and a kro `forEach` turns each record into a verified `Resource`, then fans out
 a FluxCD deployer chain per chart. The two charts deploy different podinfo versions, so the workloads are
-distinct. The generated `Resource` is what performs verification (root signature, every reference-path digest,
-and the resource digest); the `Discovery` itself is read-only and verifies nothing.
+distinct. The `Resource` controller checks resource digests, configured root signatures, and available
+reference digests; the `Discovery` itself performs no signature or resource-content verification.
 
 ```yaml
 extract:
@@ -121,18 +121,36 @@ repository A, the chart components in repository B (`subPath: discovery-localiza
 repository B; the `Component` references it with `policy: Propagate`, so the `Discovery` objects and the
 generated `Resource` objects inherit it.
 
-`chart-a` carries two images and `chart-b` one. Two `Discovery` objects extract the charts and the images,
-and kro generates a verified `Resource` for every chart and every image. The actual artifact reference is
-read from the `Resource` status:
+The local `webservice` chart exposes images at `main.image.*` and `worker.image.*`; the upstream podinfo
+chart uses `image.*`. Image resources declare their target Helm values paths with this **example-local
+convention**, not a built-in OCM standard:
 
 ```yaml
-additionalStatusFields:
-  reference: resource.access.imageReference
+labels:
+  - name: localization.ocm.software/helm
+    signing: true
+    value:
+      repository: main.image.repository
+      tag: main.image.tag
 ```
 
-Because the charts were transferred with `--copy-resources`, these references point at the local registry,
-not at `ghcr.io`. The example uses them twice: a ConfigMap per chart collects the references of all its images,
-however many there are, and each `HelmRelease` localizes the image it deploys to the resolved reference.
+Two Discoveries find chart and image identities. Generated `Resource` objects expose the resolved image
+reference and the label's mapping in `status.additional`. The RGD creates one ConfigMap per labeled image,
+holding its resolved repository/tag and target-path annotations. Each HelmRelease builds `valuesFrom`
+from those ConfigMaps, with two entries per image. Neither image names nor Helm value paths are hardcoded
+in the deployer expression. The custom chart localizes **two** images (6.9.1 and 6.9.0) in one release;
+podinfo localizes one (6.7.1). An unlabeled `image-unmapped` remains in the status summary only.
+
+The list size is dynamic: kro supports `${dyn(collection.map(...).flatten())}` for `valuesFrom`.
+`dyn` handles Flux's typed list schema, while Flux validates the generated objects. Charts must expose
+repository/tag value paths, and mappings for one release must not overlap. The example uses unique,
+Kubernetes-safe reference-path leaves as chart keys and an `image-` prefix to select image resources;
+these are fixture conventions, not universal OCM identity rules.
+
+The OCI uploader and `--copy-resources` make the exposed references point into repository B, not upstream
+`ghcr.io`. The e2e asserts the split CV placement, exact `valuesFrom` mappings, all image status references,
+and actual Ready Pods running each expected localized image. Root signature verification requires an
+appropriate verifier configuration; this unsigned fixture does not demonstrate authenticity verification.
 
 `status.component.repositorySpec` of a `Resource` reached through a reference path shows the repository of
 the root component, not the repository the nested component was resolved from. Use the resolved access

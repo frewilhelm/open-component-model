@@ -29,16 +29,15 @@ components:
     provider:
       name: ocm.software
     componentReferences:
-      - name: chart-a
-        componentName: ocm.software/ocm-k8s-toolkit/examples/discovery-localization/chart-a
+      - name: chart-webservice
+        componentName: ocm.software/ocm-k8s-toolkit/examples/discovery-localization/chart-webservice
         version: "1.0.0"
-      - name: chart-b
-        componentName: ocm.software/ocm-k8s-toolkit/examples/discovery-localization/chart-b
+      - name: chart-podinfo
+        componentName: ocm.software/ocm-k8s-toolkit/examples/discovery-localization/chart-podinfo
         version: "1.0.0"
-  # chart-a carries two images (the one the chart deploys and an extra canary
-  # image); chart-b carries one. The number of images per chart is discovered,
-  # not hard-coded.
-  - name: ocm.software/ocm-k8s-toolkit/examples/discovery-localization/chart-a
+  # Each labeled image declares its own target values. The third image has no
+  # mapping and is exposed in status without being injected into the release.
+  - name: ocm.software/ocm-k8s-toolkit/examples/discovery-localization/chart-webservice
     version: "1.0.0"
     provider:
       name: ocm.software
@@ -46,22 +45,42 @@ components:
       - name: helm-resource
         type: helmChart
         version: "1.0.0"
-        access:
-          type: ociArtifact
-          imageReference: "ghcr.io/stefanprodan/charts/podinfo:6.9.1@sha256:565d310746f1fa4be7f93ba7965bb393153a2d57a15cfe5befc909b790a73f8a"
-      - name: image-podinfo
+        input:
+          type: Helm/v1
+          path: ./charts/webservice
+      - name: image-main
         type: ociImage
         version: "6.9.1"
+        labels:
+          - name: localization.ocm.software/helm
+            signing: true
+            value:
+              repository: main.image.repository
+              tag: main.image.tag
         access:
           type: ociRegistry
           imageReference: "ghcr.io/stefanprodan/podinfo:6.9.1@sha256:262578cde928d5c9eba3bce079976444f624c13ed0afb741d90d5423877496cb"
-      - name: image-podinfo-canary
+      - name: image-canary
         type: ociImage
         version: "6.9.0"
+        labels:
+          - name: localization.ocm.software/helm
+            signing: true
+            value:
+              repository: worker.image.repository
+              tag: worker.image.tag
         access:
           type: ociRegistry
           imageReference: "ghcr.io/stefanprodan/podinfo:6.9.0@sha256:10af81c9659824cecaa7fe09134c6c318136341b4ae84c4a37f18d9bd8a33eac"
-  - name: ocm.software/ocm-k8s-toolkit/examples/discovery-localization/chart-b
+      - name: image-unmapped
+        type: ociImage
+        version: "6.7.1"
+        access:
+          type: ociRegistry
+          imageReference: "ghcr.io/stefanprodan/podinfo:6.7.1@sha256:862ca45e61b32392f7941a1bdfdbe5ff8b6899070135f1bdca1c287d0057fc94"
+  # chart-podinfo uses the upstream podinfo chart, whose image lives under the
+  # standard path image.*. Same mechanism, different layout.
+  - name: ocm.software/ocm-k8s-toolkit/examples/discovery-localization/chart-podinfo
     version: "1.0.0"
     provider:
       name: ocm.software
@@ -72,9 +91,15 @@ components:
         access:
           type: ociArtifact
           imageReference: "ghcr.io/stefanprodan/charts/podinfo:6.7.1@sha256:4d5bd3562f0b150bd6cdfdbfb149e7e4ac36e555e25baa1da9f511f4d9fb7391"
-      - name: image-podinfo
+      - name: image-main
         type: ociImage
         version: "6.7.1"
+        labels:
+          - name: localization.ocm.software/helm
+            signing: true
+            value:
+              repository: image.repository
+              tag: image.tag
         access:
           type: ociRegistry
           imageReference: "ghcr.io/stefanprodan/podinfo:6.7.1@sha256:862ca45e61b32392f7941a1bdfdbe5ff8b6899070135f1bdca1c287d0057fc94"
