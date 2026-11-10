@@ -9,48 +9,71 @@ spec:
     spec:
       prefix: string | default="discovery-localization"
   resources:
+    # Chart discovery: select resources named exactly "chart" across all products.
     - id: chartDiscovery
       readyWhen:
         - ${chartDiscovery.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
         - ${chartDiscovery.status.observedGeneration == chartDiscovery.metadata.generation}
+        # Require exactly three chart records, one per product alias, each with a
+        # one-hop reference path. Unexpected or missing records keep the instance pending.
+        - ${size(chartDiscovery.status.extracted) == 3}
+        - ${chartDiscovery.status.extracted.all(rec, size(rec.referencePath) == 1)}
+        - ${chartDiscovery.status.extracted.exists(rec, rec.product == "podinfo")}
+        - ${chartDiscovery.status.extracted.exists(rec, rec.product == "prometheus")}
+        - ${chartDiscovery.status.extracted.exists(rec, rec.product == "grafana")}
       template:
         apiVersion: delivery.ocm.software/v1alpha1
         kind: Discovery
         metadata:
           name: ${schema.spec.prefix + '-charts'}
+          labels:
+            discovery.ocm.software/instance: ${schema.metadata.name}
         spec:
           componentRef:
             name: discovery-localization-component
           resourceSelector:
             matchIdentity:
-              name: helm-resource
+              name: chart
           extract:
             byResources:
-              chart: referencePath[size(referencePath) - 1].name
+              product: referencePath[0].name
               resource: '{"name": resource.name}'
               referencePath: referencePath
-    # Image names use the image- prefix in this example. The reference-path
-    # leaf is a unique chart key here; it is not a universal graph identifier.
+              name: resource.name
+
+    # Image discovery: select the four product image resources by name.
     - id: imageDiscovery
       readyWhen:
         - ${imageDiscovery.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
         - ${imageDiscovery.status.observedGeneration == imageDiscovery.metadata.generation}
+        # Require exactly four image records — one per product/resource pair — each
+        # with a one-hop reference path. Missing or extra images keep the instance pending.
+        - ${size(imageDiscovery.status.extracted) == 4}
+        - ${imageDiscovery.status.extracted.all(rec, size(rec.referencePath) == 1)}
+        - ${imageDiscovery.status.extracted.exists(rec, rec.product == "podinfo" && rec.name == "image")}
+        - ${imageDiscovery.status.extracted.exists(rec, rec.product == "prometheus" && rec.name == "server-image")}
+        - ${imageDiscovery.status.extracted.exists(rec, rec.product == "prometheus" && rec.name == "config-reloader-image")}
+        - ${imageDiscovery.status.extracted.exists(rec, rec.product == "grafana" && rec.name == "image")}
       template:
         apiVersion: delivery.ocm.software/v1alpha1
         kind: Discovery
         metadata:
           name: ${schema.spec.prefix + '-images'}
+          labels:
+            discovery.ocm.software/instance: ${schema.metadata.name}
         spec:
           componentRef:
             name: discovery-localization-component
           resourceSelector:
-            expression: identity.name.startsWith("image-")
+            expression: identity.name in ["image", "server-image", "config-reloader-image"]
           extract:
             byResources:
-              chart: referencePath[size(referencePath) - 1].name
-              name: referencePath[size(referencePath) - 1].name + "-" + resource.name
+              product: referencePath[0].name
               resource: '{"name": resource.name}'
               referencePath: referencePath
+              name: resource.name
+
+    # Verified chart Resources, one per discovered product chart.
     - id: charts
       forEach:
         - rec: ${chartDiscovery.status.extracted}
@@ -61,9 +84,10 @@ spec:
         apiVersion: delivery.ocm.software/v1alpha1
         kind: Resource
         metadata:
-          name: ${schema.spec.prefix + '-' + rec.chart}
+          name: ${schema.spec.prefix + '-' + rec.product + '-chart'}
           labels:
-            discovery.ocm.software/chart: ${schema.spec.prefix + '-' + rec.chart}
+            discovery.ocm.software/product: ${rec.product}
+            discovery.ocm.software/instance: ${schema.metadata.name}
         spec:
           componentRef:
             name: discovery-localization-component
@@ -71,10 +95,13 @@ spec:
             byReference:
               resource: ${rec.resource}
               referencePath: ${rec.referencePath}
+          verificationPolicy: Always
           additionalStatusFields:
             registry: resource.access.toOCI().registry
             repository: resource.access.toOCI().repository
             digest: resource.access.toOCI().digest
+
+    # Verified image Resources, one per discovered product image.
     - id: images
       forEach:
         - rec: ${imageDiscovery.status.extracted}
@@ -85,9 +112,10 @@ spec:
         apiVersion: delivery.ocm.software/v1alpha1
         kind: Resource
         metadata:
-          name: ${schema.spec.prefix + '-image-' + rec.name}
+          name: ${schema.spec.prefix + '-' + rec.product + '-' + rec.name}
           labels:
-            discovery.ocm.software/chart: ${schema.spec.prefix + '-' + rec.chart}
+            discovery.ocm.software/product: ${rec.product}
+            discovery.ocm.software/instance: ${schema.metadata.name}
         spec:
           componentRef:
             name: discovery-localization-component
@@ -95,56 +123,228 @@ spec:
             byReference:
               resource: ${rec.resource}
               referencePath: ${rec.referencePath}
+          verificationPolicy: Always
           additionalStatusFields:
             reference: resource.access.imageReference
             registry: resource.access.toOCI().registry
             repository: resource.access.toOCI().repository
             tag: resource.access.toOCI().tag
-            # Evaluate this inside the Resource controller after resolution,
-            # rather than injecting a literal value path as a CEL expression.
-            targets: >-
-              has(resource.labels) && resource.labels != null
-                ? resource.labels.filter(l, l.name == "localization.ocm.software/helm").map(l, l.value)
-                : []
-    - id: imageReferences
-      forEach:
-        - chart: ${charts}
+            digest: resource.access.toOCI().digest
+
+    # Operator-owned Helm values ConfigMap for podinfo.
+    # Requires non-empty registry/repository/tag and a SHA-256 digest before
+    # publishing. The Resource controller verifies before computing these fields.
+    - id: podinfoValues
+      readyWhen:
+        - ${podinfoValues.metadata.name != ""}
       template:
         apiVersion: v1
         kind: ConfigMap
         metadata:
-          name: ${chart.metadata.name + '-images'}
-        data:
-          images: '${images.filter(i, i.metadata.labels["discovery.ocm.software/chart"] == chart.metadata.labels["discovery.ocm.software/chart"]).map(i, i.status.additional.reference).join(",")}'
-    # An OCM label name is unique on a resource, so targets[0] is the one
-    # declared mapping, not an arbitrary image chosen from a collection.
-    - id: localizationValues
-      forEach:
-        - img: ${images.filter(i, size(i.status.additional.targets) > 0)}
-      template:
-        apiVersion: v1
-        kind: ConfigMap
-        metadata:
-          name: ${img.metadata.name + '-values'}
+          name: ${schema.spec.prefix + '-podinfo-values'}
           labels:
-            discovery.ocm.software/chart: ${img.metadata.labels["discovery.ocm.software/chart"]}
+            discovery.ocm.software/product: podinfo
+            discovery.ocm.software/instance: ${schema.metadata.name}
             reconcile.fluxcd.io/watch: "Enabled"
-          annotations:
-            localization.ocm.software/repository-path: ${img.status.additional.targets[0].repository}
-            localization.ocm.software/tag-path: ${img.status.additional.targets[0].tag}
         data:
-          repository: ${img.status.additional.registry + "/" + img.status.additional.repository}
-          tag: ${img.status.additional.tag}
+          # The Resource controller verifies digests before emitting additional status.
+          # registry + '/' + repository gives the combined location under repo B.
+          values.yaml: |
+            fullnameOverride: "${schema.spec.prefix}-podinfo"
+            redis:
+              enabled: false
+            image:
+              repository: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-podinfo-image')[0].status.additional.registry + '/' + images.filter(i, i.metadata.name == schema.spec.prefix + '-podinfo-image')[0].status.additional.repository}"
+              tag: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-podinfo-image')[0].status.additional.tag + '@' + images.filter(i, i.metadata.name == schema.spec.prefix + '-podinfo-image')[0].status.additional.digest}"
+
+    # Operator-owned Helm values ConfigMap for Prometheus.
+    # Disables optional subcharts not in this profile. Enables only the podinfo
+    # scrape job; all built-in default jobs are disabled.
+    - id: prometheusValues
+      readyWhen:
+        - ${prometheusValues.metadata.name != ""}
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${schema.spec.prefix + '-prometheus-values'}
+          labels:
+            discovery.ocm.software/product: prometheus
+            discovery.ocm.software/instance: ${schema.metadata.name}
+            reconcile.fluxcd.io/watch: "Enabled"
+        data:
+          values.yaml: |
+            server:
+              fullnameOverride: "${schema.spec.prefix}-prometheus"
+              persistentVolume:
+                enabled: false
+              global:
+                scrape_interval: 5s
+                scrape_timeout: 4s
+                evaluation_interval: 5s
+              image:
+                repository: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-prometheus-server-image')[0].status.additional.registry + '/' + images.filter(i, i.metadata.name == schema.spec.prefix + '-prometheus-server-image')[0].status.additional.repository}"
+                tag: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-prometheus-server-image')[0].status.additional.tag}"
+                digest: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-prometheus-server-image')[0].status.additional.digest}"
+            configmapReload:
+              prometheus:
+                image:
+                  repository: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-prometheus-config-reloader-image')[0].status.additional.registry + '/' + images.filter(i, i.metadata.name == schema.spec.prefix + '-prometheus-config-reloader-image')[0].status.additional.repository}"
+                  tag: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-prometheus-config-reloader-image')[0].status.additional.tag}"
+                  digest: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-prometheus-config-reloader-image')[0].status.additional.digest}"
+            alertmanager:
+              enabled: false
+            kube-state-metrics:
+              enabled: false
+            prometheus-node-exporter:
+              enabled: false
+            prometheus-pushgateway:
+              enabled: false
+            serverFiles:
+              prometheus.yml:
+                scrape_configs:
+                  - job_name: podinfo
+                    metrics_path: /metrics
+                    static_configs:
+                      - targets:
+                          - "${schema.spec.prefix}-podinfo.default.svc:9898"
+            scrapeConfigs:
+              prometheus:
+                enabled: false
+              kubernetes-api-servers:
+                enabled: false
+              kubernetes-nodes:
+                enabled: false
+              kubernetes-nodes-cadvisor:
+                enabled: false
+              kubernetes-service-endpoints:
+                enabled: false
+              kubernetes-service-endpoints-slow:
+                enabled: false
+              prometheus-pushgateway:
+                enabled: false
+              kubernetes-services:
+                enabled: false
+              kubernetes-pods:
+                enabled: false
+              kubernetes-pods-slow:
+                enabled: false
+
+    # Operator-owned Helm values ConfigMap for Grafana.
+    # Uses external ConfigMap for the podinfo dashboard (grafanaDashboard node).
+    # Grafana's sha field adds "sha256:" itself; pass only the hex hash.
+    - id: grafanaValues
+      readyWhen:
+        - ${grafanaValues.metadata.name != ""}
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${schema.spec.prefix + '-grafana-values'}
+          labels:
+            discovery.ocm.software/product: grafana
+            discovery.ocm.software/instance: ${schema.metadata.name}
+            reconcile.fluxcd.io/watch: "Enabled"
+        data:
+          values.yaml: |
+            fullnameOverride: "${schema.spec.prefix}-grafana"
+            testFramework:
+              enabled: false
+            initChownData:
+              enabled: false
+            persistence:
+              enabled: false
+            image:
+              registry: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-grafana-image')[0].status.additional.registry}"
+              repository: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-grafana-image')[0].status.additional.repository}"
+              tag: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-grafana-image')[0].status.additional.tag}"
+              sha: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-grafana-image')[0].status.additional.digest.split(':')[1]}"
+            datasources:
+              datasources.yaml:
+                apiVersion: 1
+                datasources:
+                  - name: Prometheus
+                    uid: prometheus
+                    type: prometheus
+                    access: proxy
+                    url: "http://${schema.spec.prefix}-prometheus.default.svc:80"
+                    isDefault: true
+                    editable: false
+            dashboardProviders:
+              dashboardproviders.yaml:
+                apiVersion: 1
+                providers:
+                  - name: default
+                    orgId: 1
+                    folder: ""
+                    type: file
+                    disableDeletion: false
+                    editable: false
+                    options:
+                      path: /var/lib/grafana/dashboards/default
+            dashboards: {}
+            dashboardsConfigMaps:
+              default: "${grafanaDashboard.metadata.name}"
+
+    # Grafana dashboard ConfigMap for the podinfo observability dashboard.
+    # Mounted into Grafana's default dashboard folder via dashboardsConfigMaps.
+    # Using dashboards.default.*.json activates an extra curl container; this
+    # ConfigMap mount approach avoids that without any init/downloader container.
+    - id: grafanaDashboard
+      readyWhen:
+        - ${grafanaDashboard.metadata.name != ""}
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${schema.spec.prefix + '-grafana-dashboard'}
+          labels:
+            discovery.ocm.software/product: grafana
+            discovery.ocm.software/instance: ${schema.metadata.name}
+        data:
+          podinfo.json: |
+            {
+              "uid": "podinfo-observability",
+              "title": "Podinfo Observability",
+              "schemaVersion": 39,
+              "version": 1,
+              "time": {"from": "now-15m", "to": "now"},
+              "refresh": "5s",
+              "panels": [
+                {
+                  "id": 1,
+                  "type": "timeseries",
+                  "title": "Podinfo scrape availability",
+                  "gridPos": {"x": 0, "y": 0, "w": 24, "h": 8},
+                  "datasource": {"type": "prometheus", "uid": "prometheus"},
+                  "targets": [{"refId": "A", "expr": "up{job=\"podinfo\"}"}]
+                },
+                {
+                  "id": 2,
+                  "type": "timeseries",
+                  "title": "Podinfo scraped samples",
+                  "gridPos": {"x": 0, "y": 8, "w": 24, "h": 8},
+                  "datasource": {"type": "prometheus", "uid": "prometheus"},
+                  "targets": [{"refId": "A", "expr": "scrape_samples_scraped{job=\"podinfo\"}"}]
+                }
+              ]
+            }
+
+    # OCI sources, one per verified chart Resource.
     - id: ocirepositories
       forEach:
         - chart: ${charts}
+      readyWhen:
+        - ${each.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
+        - ${each.status.observedGeneration == each.metadata.generation}
       template:
         apiVersion: source.toolkit.fluxcd.io/v1
         kind: OCIRepository
         metadata:
           name: ${chart.metadata.name + '-oci'}
           labels:
-            discovery.ocm.software/chart: ${chart.metadata.labels["discovery.ocm.software/chart"]}
+            discovery.ocm.software/product: ${chart.metadata.labels["discovery.ocm.software/product"]}
+            discovery.ocm.software/instance: ${schema.metadata.name}
         spec:
           interval: 1m0s
           insecure: true
@@ -154,28 +354,35 @@ spec:
           url: oci://${chart.status.additional.registry}/${chart.status.additional.repository}
           ref:
             digest: ${chart.status.additional.digest}
+
+    # HelmReleases, one per OCIRepository. Values come from the product-specific
+    # operator ConfigMaps above. dyn() permits the generated list through kro's
+    # static check of the HelmRelease schema.
     - id: helmreleases
       forEach:
         - source: ${ocirepositories}
+      readyWhen:
+        - ${each.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
+        - ${each.status.observedGeneration == each.metadata.generation}
       template:
         apiVersion: helm.toolkit.fluxcd.io/v2
         kind: HelmRelease
         metadata:
-          name: ${source.metadata.labels["discovery.ocm.software/chart"] + '-hr'}
+          name: ${schema.spec.prefix + '-' + source.metadata.labels["discovery.ocm.software/product"] + '-hr'}
+          labels:
+            discovery.ocm.software/product: ${source.metadata.labels["discovery.ocm.software/product"]}
+            discovery.ocm.software/instance: ${schema.metadata.name}
         spec:
-          releaseName: ${source.metadata.labels["discovery.ocm.software/chart"]}
+          releaseName: ${schema.spec.prefix + '-' + source.metadata.labels["discovery.ocm.software/product"]}
           interval: 1m
           timeout: 5m
+          test:
+            enable: false
           chartRef:
             kind: OCIRepository
             name: ${source.metadata.name}
             namespace: default
-          # Reference the ConfigMap collection itself: kro creates the values
-          # ConfigMaps before HelmReleases. dyn handles Flux's typed list schema.
           valuesFrom: >-
-            ${dyn(localizationValues
-              .filter(v, v.metadata.labels["discovery.ocm.software/chart"] == source.metadata.labels["discovery.ocm.software/chart"])
-              .map(v, [
-                {"kind": "ConfigMap", "name": v.metadata.name, "valuesKey": "repository", "targetPath": v.metadata.annotations["localization.ocm.software/repository-path"]},
-                {"kind": "ConfigMap", "name": v.metadata.name, "valuesKey": "tag", "targetPath": v.metadata.annotations["localization.ocm.software/tag-path"]}
-              ]).flatten())}
+            ${dyn([podinfoValues, prometheusValues, grafanaValues].filter(v,
+              v.metadata.labels["discovery.ocm.software/product"] == source.metadata.labels["discovery.ocm.software/product"]
+            ).map(v, {"kind": "ConfigMap", "name": v.metadata.name, "valuesKey": "values.yaml"}))}

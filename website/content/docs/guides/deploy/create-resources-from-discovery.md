@@ -291,176 +291,125 @@ verification policy. For the kro variant, the name also has the `charts-` prefix
 {{< /step >}}
 {{< /steps >}}
 
-## Localize images without hardcoding chart value paths
+## Deploy a verified product release with operator-owned profiles
 
 The [discovery-localization example](https://github.com/frewilhelm/open-component-model/tree/feat/discovery-reference-path/bindings/go/kubernetes/controller/examples/discovery-localization)
-extends this flow to multiple charts in another repository and multiple images
-per release. It uses a local `webservice` chart and the upstream podinfo chart:
+demonstrates discovery-driven deployment of a connected observability product: podinfo serves the application,
+Prometheus scrapes it, and Grafana presents the results.
 
-| Chart | Image resource | Helm values populated |
+The component graph has a root (`example.com/observability-demo:1.0.0`) that references three product
+components. Each product carries a pinned upstream chart and one or more image resources with exact digest pins.
+
+| Product CV | Version | Resources |
 | --- | --- | --- |
-| webservice | `image-main` (6.9.1) | `main.image.repository`, `main.image.tag` |
-| webservice | `image-canary` (6.9.0) | `worker.image.repository`, `worker.image.tag` |
-| webservice | `image-unmapped` (6.7.1) | None; reference included in status summary only |
-| podinfo | `image-main` (6.7.1) | `image.repository`, `image.tag` |
+| `example.com/products/podinfo` | `6.9.1` | `chart`, `image` |
+| `example.com/products/prometheus` | `29.47.0` | `chart`, `server-image`, `config-reloader-image` |
+| `example.com/products/grafana` | `14.4.0` | `chart`, `image` |
 
-### Declare where each image belongs
+### Discovery-driven deployment with supplied product profiles
 
-On each image resource that should be injected, the component author declares:
-
-```yaml
-labels:
-  - name: localization.ocm.software/helm
-    signing: true
-    value:
-      repository: main.image.repository
-      tag: main.image.tag
-```
-
-This is an **example-local convention**, not a built-in OCM localization API.
-`signing: true` includes the label in signing normalization; it does not configure
-signature verification by itself. The chart author supplies the value paths —
-neither Discovery nor kro can infer arbitrary Helm schemas.
-
-One uniquely named label supplies one repository/tag pair per image. Paths must
-be distinct across images within a release, and the chart must actually use them.
-Charts taking a single full image reference, a digest field, or different image
-value types need an appropriate mapping and projection instead of this pair.
-Adding another image with a valid label adds another pair of `valuesFrom` entries;
-there is no fixed image count in the RGD. Unlabeled images remain visible in the
-per-chart summary without being injected into Helm values.
-
-The fixture uses `image-` resource-name prefixes and unique reference-path leaves
-as its chart keys. For a graph where those leaves repeat, choose a unique key that
-includes the full owning component/resource identity. Do not correlate arbitrary
-graphs by leaf name or collection index.
-
-### Build Flux inputs from verified Resource status
-
-Discovery supplies identities and reference paths. Each generated image Resource
-then reads its resolved access and mapping in its own CEL evaluation:
+Two Discoveries project one record per product resource with a one-hop `referencePath` (the product alias
+in the root's component references). Inventory predicates in the RGD require exactly the expected set of
+charts and images before the instance reaches Ready:
 
 ```yaml
-additionalStatusFields:
-  reference: resource.access.imageReference
-  registry: resource.access.toOCI().registry
-  repository: resource.access.toOCI().repository
-  tag: resource.access.toOCI().tag
-  targets: >-
-    has(resource.labels) && resource.labels != null
-      ? resource.labels.filter(l, l.name == "localization.ocm.software/helm").map(l, l.value)
-      : []
+# Chart discovery: exactly three records, one per product alias
+- ${size(chartDiscovery.status.extracted) == 3}
+- ${chartDiscovery.status.extracted.all(rec, size(rec.referencePath) == 1)}
+- ${chartDiscovery.status.extracted.exists(rec, rec.product == "podinfo")}
+
+# Image discovery: exactly four product/resource pairs
+- ${size(imageDiscovery.status.extracted) == 4}
+- ${imageDiscovery.status.extracted.exists(rec, rec.product == "prometheus" && rec.name == "server-image")}
 ```
 
-Do not inject a literal target such as `main.image.repository` as an
-`additionalStatusFields` expression — it would be parsed as CEL code. The
-expression above reads it as data from the resource label.
+The full inventory must match before any deployment values are published. Removing an image or supplying
+an unexpected record keeps the instance in a pending state rather than producing an empty deployment.
 
-kro creates a ConfigMap per labeled image, with `repository` and `tag` data keys
-from its Resource status. Annotations carry the corresponding target value paths.
-Both image and chart resources carry the same chart-group label. Each HelmRelease
-uses the ConfigMap collection as a dependency and builds its list dynamically:
+### Operator-owned profiles replace label-driven discovery
+
+Instead of inferring Helm value paths from resource labels, the operator ships the full product profiles as
+kro-managed ConfigMaps. Each ConfigMap's `values.yaml` key is assembled from verified Resource status fields:
+
+```yaml
+data:
+  values.yaml: |
+    fullnameOverride: "${schema.spec.prefix}-podinfo"
+    image:
+      repository: "${images.filter(i, i.metadata.name == schema.spec.prefix + '-podinfo-image')[0].status.additional.registry + '/' + ...repository}"
+      tag: "${...tag + '@' + ...digest}"
+```
+
+The `[0]` selector is safe here because the exact-pair inventory predicates and Resource readiness gates
+guarantee the image exists and is verified before the ConfigMap is evaluated. Do not use `[0]` as an
+unqualified first-image shortcut in a graph where the count is not fixed.
+
+Each product has its own values ConfigMap (`<prefix>-podinfo-values`, `<prefix>-prometheus-values`,
+`<prefix>-grafana-values`). Each HelmRelease's `valuesFrom` is built by filtering the three ConfigMaps to
+the one whose `discovery.ocm.software/product` label matches the OCIRepository:
 
 ```yaml
 valuesFrom: >-
-  ${dyn(localizationValues
-    .filter(v, v.metadata.labels["discovery.ocm.software/chart"] == source.metadata.labels["discovery.ocm.software/chart"])
-    .map(v, [
-      {"kind": "ConfigMap", "name": v.metadata.name, "valuesKey": "repository", "targetPath": v.metadata.annotations["localization.ocm.software/repository-path"]},
-      {"kind": "ConfigMap", "name": v.metadata.name, "valuesKey": "tag", "targetPath": v.metadata.annotations["localization.ocm.software/tag-path"]}
-    ]).flatten())}
+  ${dyn([podinfoValues, prometheusValues, grafanaValues].filter(v,
+    v.metadata.labels["discovery.ocm.software/product"] == source.metadata.labels["discovery.ocm.software/product"]
+  ).map(v, {"kind": "ConfigMap", "name": v.metadata.name, "valuesKey": "values.yaml"}))}
 ```
 
-Here `source` is the current OCIRepository from the deployer collection, carrying
-the same group label. `dyn()` permits the generated list through kro's static
-check of the HelmRelease schema; Flux and Kubernetes still validate the resulting
-entries. This works for variable-length lists inside a resource — kro is not
-limited to creating separate resources with `forEach`.
+These actual node references enforce creation order: the HelmRelease cannot be created until its values
+ConfigMap exists, which cannot be created until all image Resources are verified. Arbitrary new products
+require an operator values profile; there is no fallback that installs an unknown chart with upstream defaults.
 
-### Run the cross-repository example
+### Run the product release example
 
-Use the example files from this branch, Docker, the OCM CLI on `PATH`, Task, Helm,
-kind and kubectl. These commands create the repository's development cluster:
+Use the example files from this branch with the existing development-cluster prerequisites (Docker, OCM CLI,
+Task, Helm, kind, kubectl, Flux CLI). Set up the development cluster if needed:
 
 ```bash
-# From the repository root; use a disposable development environment.
+# From the repository root
 task bindings/go/kubernetes/controller:test/e2e/setup/local
-task bindings/go/kubernetes/controller:helm/install
-cd bindings/go/kubernetes/controller/examples/discovery-localization
-
-WORK="$(mktemp -d)"
-ROOT=ocm.software/ocm-k8s-toolkit/examples/discovery-localization
-REPO_A=http://ocm-e2e-image-registry:5000
-REPO_B="$REPO_A/discovery-localization-charts"
-ocm add cv --repository "$WORK/ctf" --constructor component-constructor.yaml
-
-# Do not transfer recursively: the chart CVs must remain outside repository A.
-for component in "$ROOT" "$ROOT/rgd" "$ROOT/platform"; do
-  ocm transfer cv "ctf::$WORK/ctf//$component:1.0.0" "$REPO_A"
-done
-for component in "$ROOT/chart-webservice" "$ROOT/chart-podinfo"; do
-  ocm transfer cv "ctf::$WORK/ctf//$component:1.0.0" "$REPO_B" \
-    --copy-resources --config uploader.yaml
-done
-
-kubectl apply -f bootstrap.yaml
-kubectl wait --for=create rgd/discovery-localization --timeout=5m
-kubectl wait --for=condition=Ready rgd/discovery-localization --timeout=5m
-kubectl apply -f instance.yaml
-kubectl wait --for=create discoverylocalization/discovery-localization --timeout=5m
-kubectl wait --for=condition=Ready discoverylocalization/discovery-localization --timeout=5m
 ```
 
-The bootstrap's resolver ConfigMap sends `.../chart-*` component names to
-repository B; `policy: Propagate` passes that configuration through the Component
-to Discoveries and Resources. Keep this mapping consistent if changing the repo
-URLs. No extra Repository or Component CR is needed for each child CV.
-
-`uploader.yaml` publishes the local Helm input as a standalone OCI artifact with
-an explicit name, then uses the default OCI uploader for remote charts and images.
-Local Helm inputs otherwise have no `referenceName` and remain local blobs.
-`--copy-resources` copies images into B too, so the deployed pull locations really
-change rather than continuing to point upstream.
-
-Inspect the data that drives the deployments:
+Then run the single launcher command:
 
 ```bash
-kubectl get resources.delivery.ocm.software \
-  -l discovery.ocm.software/chart=discovery-localization-chart-webservice -o json \
-  | jq '.items[] | {name: .metadata.name, component: .status.component.component, access: .status.resource.access, additional: .status.additional}'
-kubectl get configmap discovery-localization-chart-webservice-images -o yaml
-kubectl get helmrelease discovery-localization-chart-webservice-hr -o json \
-  | jq '.spec.valuesFrom'
-kubectl get pods -o json \
-  | jq '.items[] | select(.metadata.name | startswith("discovery-localization-")) | {name: .metadata.name, images: [.spec.containers[].image]}'
+task --dir bindings/go/kubernetes/controller/examples/discovery-localization run
 ```
 
-The custom release has four `valuesFrom` entries (two images), while podinfo has
-two. Ready Pods pull versions 6.9.1, 6.9.0 and 6.7.1 from repository B. The summary
-also includes the unmapped image, but it has no `valuesFrom` entry. Use
-`status.resource.access` for the full artifact location: for nested resources,
-`status.component.repositorySpec` currently describes the root repository rather
-than the child CV's actual repository. Also, `toOCI().reference` is only the
-tag/digest portion, not the full image reference.
+The launcher prepares pinned chart archives, builds and publishes the CVs, applies bootstrap and RGD,
+then waits for the instance and all three HelmReleases to be Ready.
 
-The dedicated e2e test runs the same flow and checks CV isolation, exact value
-mappings and Ready Pod image references. From the repository root:
+Inspect what was deployed:
 
 ```bash
-task bindings/go/kubernetes/controller:test/e2e -- --focus="Cross-Repository Localization"
-task bindings/go/kubernetes/controller:test/e2e/setup/teardown
+# Verified Resources: seven (three charts + four images)
+kubectl -n default get resources.delivery.ocm.software \
+  -l discovery.ocm.software/instance=discovery-localization -o wide
+
+# OCI sources and Helm releases
+kubectl -n default get ocirepositories,helmreleases \
+  -l discovery.ocm.software/instance=discovery-localization
+
+# Read the generated Grafana admin password (never passed through logs or arguments)
+kubectl -n default get secret discovery-localization-grafana \
+  -o jsonpath='{.data.admin-user}' | base64 -d && echo
+kubectl -n default get secret discovery-localization-grafana \
+  -o jsonpath='{.data.admin-password}' | base64 -d && echo
+
+# Port-forward and open the Podinfo Observability dashboard
+kubectl -n default port-forward service/discovery-localization-grafana 3000:80
+# open http://localhost:3000/d/podinfo-observability
 ```
 
-### Troubleshoot localization
+Log in with the credentials above. The dashboard shows scrape availability and scraped sample count for the
+podinfo target, sourced from the Prometheus instance deployed in the same namespace.
 
-- Empty `targets`: check the exact OCM label name, and distinguish a missing label
-  (intentionally status-only) from an incorrectly written one.
-- Source-registry image references: check `--copy-resources` and `uploader.yaml`.
-- Invalid value path or duplicate mappings: correct the descriptor labels; there
-  is no schema inference or conflict resolution in this example.
-- A chart needs digest-only or full-reference values: change the label contract
-  and ConfigMap projection for that chart interface, rather than forcing it into
-  repository/tag fields.
+The dedicated e2e test runs the full flow and asserts split CV placement, all seven verified resource
+identities, three distinct upstream chart workloads with the four expected mirror digest pins, and live
+Prometheus results through authenticated Grafana queries:
+
+```bash
+task bindings/go/kubernetes/controller:test/e2e -- --focus="Discovery Cross-Repository Localization" --procs=1
+```
 
 ## Troubleshooting
 

@@ -113,54 +113,51 @@ task test/e2e -- --focus="Discovery Reference Path"
 
 ## discovery-localization
 
-**Deployer:** FluxCD (one `OCIRepository` + `HelmRelease` per discovered chart)
+**Deployer:** FluxCD (one `OCIRepository` + `HelmRelease` per product)
 
-The component versions are split across two repositories: the root, `rgd` and `platform` components live in
-repository A, the chart components in repository B (`subPath: discovery-localization-charts`). A
-`resolvers.config.ocm.software/v1alpha1` configuration in a ConfigMap routes the chart component names to
-repository B; the `Component` references it with `policy: Propagate`, so the `Discovery` objects and the
-generated `Resource` objects inherit it.
+A four-component product release: podinfo serves the application, Prometheus scrapes it, and Grafana presents
+the results. The root component `example.com/observability-demo:1.0.0` references three product components
+(`podinfo:6.9.1`, `prometheus:29.47.0`, `grafana:14.4.0`), each carrying a chart and image resources with
+pinned upstream digests. Product components live in repository B (`subPath: discovery-localization-products`);
+the root lives in repository A. A `resolvers.config.ocm.software/v1alpha1` ConfigMap routes product names to
+repository B; `policy: Propagate` passes it through the Component to Discoveries and Resources.
 
-The local `webservice` chart exposes images at `main.image.*` and `worker.image.*`; the upstream podinfo
-chart uses `image.*`. Image resources declare their target Helm values paths with this **example-local
-convention**, not a built-in OCM standard:
+Two Discoveries — one for charts, one for images — extract one record per product resource with a one-hop
+`referencePath`. Inventory predicates require exactly three charts and four images (podinfo/image,
+prometheus/server-image, prometheus/config-reloader-image, grafana/image), each appearing once with path
+length one. Missing or unexpected records keep the instance pending.
 
-```yaml
-labels:
-  - name: localization.ocm.software/helm
-    signing: true
-    value:
-      repository: main.image.repository
-      tag: main.image.tag
-```
-
-Two Discoveries find chart and image identities. Generated `Resource` objects expose the resolved image
-reference and the label's mapping in `status.additional`. The RGD creates one ConfigMap per labeled image,
-holding its resolved repository/tag and target-path annotations. Each HelmRelease builds `valuesFrom`
-from those ConfigMaps, with two entries per image. Neither image names nor Helm value paths are hardcoded
-in the deployer expression. The custom chart localizes **two** images (6.9.1 and 6.9.0) in one release;
-podinfo localizes one (6.7.1). An unlabeled `image-unmapped` remains in the status summary only.
-
-The list size is dynamic: kro supports `${dyn(collection.map(...).flatten())}` for `valuesFrom`.
-`dyn` handles Flux's typed list schema, while Flux validates the generated objects. Charts must expose
-repository/tag value paths, and mappings for one release must not overlap. The example uses unique,
-Kubernetes-safe reference-path leaves as chart keys and an `image-` prefix to select image resources;
-these are fixture conventions, not universal OCM identity rules.
-
-The OCI uploader and `--copy-resources` make the exposed references point into repository B, not upstream
-`ghcr.io`. The e2e asserts the split CV placement, exact `valuesFrom` mappings, all image status references,
-and actual Ready Pods running each expected localized image. Root signature verification requires an
-appropriate verifier configuration; this unsigned fixture does not demonstrate authenticity verification.
-
-`status.component.repositorySpec` of a `Resource` reached through a reference path shows the repository of
-the root component, not the repository the nested component was resolved from. Use the resolved access
-reference to locate the artifact.
-
-This example has its own e2e test (`test/e2e/e2e_discovery_localization_test.go`) because its component
-versions are transferred to two repositories.
+The RGD creates seven verified `Resource` objects (`verificationPolicy: Always`), three operator-owned Helm
+values ConfigMaps, a Grafana dashboard ConfigMap, three OCIRepositories, and three HelmReleases. Image values
+come exclusively from verified `Resource` status fields — no upstream image coordinates appear in the RGD.
+Each HelmRelease uses `valuesFrom` pointing at the per-product values ConfigMap. No `targetPath` or inline
+overrides are used.
 
 ```bash
-task test/e2e -- --focus="Cross-Repository Localization"
+# From the repository root: set up the development cluster if needed
+task bindings/go/kubernetes/controller:test/e2e/setup/local
+
+# Run the example with the included launcher
+task --dir bindings/go/kubernetes/controller/examples/discovery-localization run
+
+# Inspect running resources
+kubectl -n default get resources.delivery.ocm.software -l discovery.ocm.software/instance=discovery-localization
+kubectl -n default get ocirepositories,helmreleases -l discovery.ocm.software/instance=discovery-localization
+
+# Read the generated Grafana admin password
+kubectl -n default get secret discovery-localization-grafana \
+  -o jsonpath='{.data.admin-password}' | base64 -d && echo
+
+# Open the Podinfo Observability dashboard
+kubectl -n default port-forward service/discovery-localization-grafana 3000:80
+# http://localhost:3000/d/podinfo-observability
+```
+
+This example has its own e2e test (`test/e2e/e2e_discovery_localization_test.go`) and is excluded from the
+generic examples loop.
+
+```bash
+task test/e2e -- --focus="Discovery Cross-Repository Localization" --procs=1
 ```
 
 ---

@@ -1,7 +1,7 @@
-# Resolver configuration: components matching the chart pattern are fetched
-# from repository B (subPath discovery-localization-charts); everything else
-# falls back to the Component's repository (A). The Component propagates this
-# configuration to the Discovery objects and the generated Resources.
+# Resolver configuration: product components matching the products pattern are
+# fetched from repository B (subPath discovery-localization-products); the root
+# component falls back to repository A. The Component propagates this
+# configuration to Discovery and Resource objects via policy: Propagate.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,8 +15,8 @@ data:
           - repository:
               type: OCIRepository/v1
               baseUrl: http://ocm-e2e-image-registry:5000
-              subPath: discovery-localization-charts
-            componentNamePattern: "ocm.software/ocm-k8s-toolkit/examples/discovery-localization/chart-*"
+              subPath: discovery-localization-products
+            componentNamePattern: "example.com/products/*"
 ---
 apiVersion: delivery.ocm.software/v1alpha1
 kind: Repository
@@ -34,7 +34,7 @@ kind: Component
 metadata:
   name: discovery-localization-component
 spec:
-  component: ocm.software/ocm-k8s-toolkit/examples/discovery-localization
+  component: example.com/observability-demo
   repositoryRef:
     name: discovery-localization-repository
   semver: 1.0.0
@@ -43,55 +43,3 @@ spec:
     - kind: ConfigMap
       name: discovery-localization-resolvers
       policy: Propagate
----
-apiVersion: delivery.ocm.software/v1alpha1
-kind: Resource
-metadata:
-  name: discovery-localization-resource-nested-rgd
-spec:
-  componentRef:
-    name: discovery-localization-component
-  resource:
-    byReference:
-      resource:
-        name: kro-rgd
-      referencePath:
-        - name: nested-rgd
----
-# The NamespacedDeployer applies the cluster-scoped ResourceGraphDefinition with the permissions of this
-# service account, so it needs a ClusterRole for ResourceGraphDefinitions.
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: discovery-localization-deployer
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: discovery-localization-deployer
-rules:
-  - apiGroups: ["kro.run"]
-    resources: ["resourcegraphdefinitions"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: discovery-localization-deployer
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: discovery-localization-deployer
-subjects:
-  - kind: ServiceAccount
-    name: discovery-localization-deployer
-    namespace: default
----
-apiVersion: delivery.ocm.software/v1alpha1
-kind: NamespacedDeployer
-metadata:
-  name: discovery-localization-deployer
-spec:
-  resourceRef:
-    name: discovery-localization-resource-nested-rgd
-  serviceAccountName: discovery-localization-deployer

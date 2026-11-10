@@ -1,10 +1,13 @@
 type: generic.config.ocm.software/v1
 configurations:
   # Local Helm input produces an OCI-layout local blob without a referenceName.
-  # Give that chart an explicit standalone OCI name so Flux can fetch it.
+  # Give each chart an explicit standalone OCI name so Flux can fetch it.
+  # The chart version is used as the image tag in repository B.
   - type: oci.uploader.transfer.config.ocm.software/v1alpha1
     match: >-
       target.type == "OCIRepository" && resource.access.isType("LocalBlob")
         && has(resource.access.mediaType) && isOCIManifest(resource.access.mediaType)
     imageReference: '${target.baseUrl + (target.subPath == "" ? "" : "/" + target.subPath) + "/charts/" + resource.name + ":" + resource.version}'
+  # Default entry: copy any other OCI resource (external images) preserving the
+  # upstream repository path below repository B, pinning the access digest.
   - type: oci.uploader.transfer.config.ocm.software/v1alpha1
