@@ -50,35 +50,49 @@ var _ = Describe("Discovery Reference Path Tests", func() {
 			By("creating an instance of the example")
 			Expect(utils.DeployResource(ctx, filepath.Join(exampleDir, Instance))).To(Succeed())
 
-			// Both charts are named <prefix>-<slug>; slug is the reference-path
-			// leaf (chart-a / chart-b). The Discovery finds both helm-resource
-			// resources, one per nested chart component.
-			charts := []string{exampleName + "-chart-a", exampleName + "-chart-b"}
+			// Each chart is named <prefix>-<slug>; slug is the reference-path leaf
+			// (chart-a / chart-b). The two nested chart components carry different
+			// podinfo versions, so the reference paths differ and the deployed
+			// container images differ. image is the podinfo tag each version pins.
+			charts := []struct {
+				name  string
+				leaf  string
+				image string
+			}{
+				{exampleName + "-chart-a", "chart-a", "6.9.1"},
+				{exampleName + "-chart-b", "chart-b", "6.7.1"},
+			}
 
 			By("waiting for both generated Resources to be verified (Ready)")
 			for _, c := range charts {
-				Expect(utils.WaitForResource(ctx, "create", timeout, "resource.delivery.ocm.software/"+c)).To(Succeed())
-				Expect(utils.WaitForResource(ctx, "condition=Ready=true", timeout, "resource.delivery.ocm.software/"+c)).To(Succeed())
+				Expect(utils.WaitForResource(ctx, "create", timeout, "resource.delivery.ocm.software/"+c.name)).To(Succeed())
+				Expect(utils.WaitForResource(ctx, "condition=Ready=true", timeout, "resource.delivery.ocm.software/"+c.name)).To(Succeed())
 			}
 
 			By("verifying each Resource recorded the reference path to its nested component")
 			for _, c := range charts {
-				leaf := strings.TrimPrefix(c, exampleName+"-") // chart-a / chart-b
 				out, err := utils.Run(exec.CommandContext(ctx, "kubectl", "get",
-					"resource.delivery.ocm.software/"+c, "-n", "default",
+					"resource.delivery.ocm.software/"+c.name, "-n", "default",
 					"-o", "jsonpath={.spec.resource.byReference.referencePath}",
 				))
 				Expect(err).NotTo(HaveOccurred())
 				path := strings.TrimSpace(string(out))
-				Expect(path).To(Equal(`[{"name":"platform"},{"name":"` + leaf + `"}]`),
-					"Resource %q must carry the two-hop reference path discovered for it", c)
+				Expect(path).To(Equal(`[{"name":"platform"},{"name":"`+c.leaf+`"}]`),
+					"Resource %q must carry the two-hop reference path discovered for it", c.name)
 			}
 
-			By("waiting for both podinfo Deployments to be Available")
+			By("waiting for both podinfo Deployments to be Available with their distinct images")
 			for _, c := range charts {
-				dep := "deployment.apps/" + c + "-podinfo"
+				dep := "deployment.apps/" + c.name + "-podinfo"
 				Expect(utils.WaitForResource(ctx, "create", timeout, dep)).To(Succeed())
 				Expect(utils.WaitForResource(ctx, "condition=Available", timeout, dep)).To(Succeed())
+
+				out, err := utils.Run(exec.CommandContext(ctx, "kubectl", "get", dep, "-n", "default",
+					"-o", "jsonpath={.spec.template.spec.containers[0].image}"))
+				Expect(err).NotTo(HaveOccurred())
+				image := strings.TrimSpace(string(out))
+				Expect(image).To(HaveSuffix(":"+c.image),
+					"Deployment %q must run the podinfo image its chart version pins", dep)
 			}
 		})
 	})

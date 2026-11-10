@@ -84,11 +84,12 @@ resource:
 **Deployer:** FluxCD (one `OCIRepository` + `HelmRelease` per discovered chart)
 
 Like `helm-nested`, but the chart `Resource` objects are not hand-written. The `platform` component references
-two nested chart components, each carrying a `helm-resource`. A `Discovery` extracts one record per matching
-resource — including the `referencePath` of the nested component that owns it — and a kro `forEach` turns each
-record into a verified `Resource`, then fans out a FluxCD deployer chain per chart. The generated `Resource` is
-what performs verification (root signature, every reference-path digest, and the resource digest); the
-`Discovery` itself is read-only and verifies nothing.
+two nested chart components (`chart-a` pinning podinfo 6.9.1, `chart-b` pinning podinfo 6.7.1), each carrying a
+`helm-resource`. A `Discovery` extracts one record per matching resource — including the `referencePath` of the
+nested component that owns it — and a kro `forEach` turns each record into a verified `Resource`, then fans out
+a FluxCD deployer chain per chart. The two charts deploy different podinfo versions, so the workloads are
+distinct. The generated `Resource` is what performs verification (root signature, every reference-path digest,
+and the resource digest); the `Discovery` itself is read-only and verifies nothing.
 
 ```yaml
 extract:
