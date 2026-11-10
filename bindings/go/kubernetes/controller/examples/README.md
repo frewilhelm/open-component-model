@@ -81,24 +81,30 @@ resource:
 
 ## discovery-resources
 
-**Deployers:** FluxCD + ArgoCD
+**Deployer:** FluxCD (one `OCIRepository` + `HelmRelease` per discovered chart)
 
-Like `helm-nested`, but the chart `Resource` is not hand-written. A `Discovery` extracts one record per matching
-resource, including the `referencePath` of the nested component that owns it, and a kro `forEach` turns each
-record into a `Resource`. The generated `Resource` is what performs verification (root signature, every
-reference-path digest, and the resource digest); the `Discovery` itself is read-only and verifies nothing.
+Like `helm-nested`, but the chart `Resource` objects are not hand-written. The `platform` component references
+two nested chart components, each carrying a `helm-resource`. A `Discovery` extracts one record per matching
+resource — including the `referencePath` of the nested component that owns it — and a kro `forEach` turns each
+record into a verified `Resource`, then fans out a FluxCD deployer chain per chart. The generated `Resource` is
+what performs verification (root signature, every reference-path digest, and the resource digest); the
+`Discovery` itself is read-only and verifies nothing.
 
 ```yaml
 extract:
   byResources:
-    name: '(component.name + "-" + resource.name).replace("/", "-").replace(".", "-")'
+    # slug is the reference-path leaf (chart-a / chart-b), used to name the Resource and release
+    slug: referencePath[size(referencePath) - 1].name
     resource: '{"name": resource.name}'
     referencePath: referencePath
 ```
 
+This example has its own e2e test (`test/e2e/e2e_discovery_test.go`) and is excluded from the generic examples
+loop, because it deploys multiple charts rather than a single `<example>-podinfo` workload.
+
 ```bash
 # Run this example in isolation
-task test/e2e -- --focus=discovery-resources
+task test/e2e -- --focus="Discovery Reference Path"
 ```
 
 ---

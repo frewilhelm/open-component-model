@@ -21,15 +21,32 @@ components:
         input:
           type: file
           path: ./rgd.yaml
+  # platform references two different nested chart components. Discovery finds
+  # the helm resource in each, with a distinct reference path per chart, and the
+  # RGD fans out one verified Resource and one deployer chain per discovered chart.
   - name: ocm.software/ocm-k8s-toolkit/examples/discovery-resources/platform
     version: "1.0.0"
     provider:
       name: ocm.software
     componentReferences:
-      - name: chart
-        componentName: ocm.software/ocm-k8s-toolkit/examples/discovery-resources/chart
+      - name: chart-a
+        componentName: ocm.software/ocm-k8s-toolkit/examples/discovery-resources/chart-a
         version: "1.0.0"
-  - name: ocm.software/ocm-k8s-toolkit/examples/discovery-resources/chart
+      - name: chart-b
+        componentName: ocm.software/ocm-k8s-toolkit/examples/discovery-resources/chart-b
+        version: "1.0.0"
+  - name: ocm.software/ocm-k8s-toolkit/examples/discovery-resources/chart-a
+    version: "1.0.0"
+    provider:
+      name: ocm.software
+    resources:
+      - name: helm-resource
+        type: helmChart
+        version: "1.0.0"
+        access:
+          type: ociArtifact
+          imageReference: "ghcr.io/stefanprodan/charts/podinfo:6.9.1@sha256:565d310746f1fa4be7f93ba7965bb393153a2d57a15cfe5befc909b790a73f8a"
+  - name: ocm.software/ocm-k8s-toolkit/examples/discovery-resources/chart-b
     version: "1.0.0"
     provider:
       name: ocm.software
