@@ -32,7 +32,7 @@ var ignoreExamples = map[string]struct{}{
 	"applyset-pruning":       {}, // tested in e2e_applyset_test.go
 	"replication-simple":     {}, // tested in e2e_replication_test.go
 	"discovery-resources":    {}, // tested in e2e_discovery_test.go
-	"discovery-localization": {}, // tested in e2e_discovery_test.go
+	"discovery-localization": {}, // tested in e2e_discovery_localization_test.go
 }
 
 var _ = Describe("controller", func() {
