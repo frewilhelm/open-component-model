@@ -213,7 +213,13 @@ func PrepareOCMComponent(ctx context.Context, name, componentConstructorPath, im
 	By("transferring ocm component for " + name)
 	cmd = exec.CommandContext(ctx, ocm, "transfer", "cv", transferRef, imageRegistry)
 
-	if strings.Contains(name, "nested") {
+	// Transfer the whole reference graph when the component has references, so
+	// examples with nested components ship every referenced component version.
+	constructor, err := os.ReadFile(componentConstructorPath)
+	if err != nil {
+		return fmt.Errorf("could not read component constructor: %w", err)
+	}
+	if strings.Contains(string(constructor), "componentReferences:") {
 		cmd.Args = append(cmd.Args, "--recursive")
 	}
 

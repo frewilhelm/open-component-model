@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
+	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
 // ComponentKey identifies a component by name and version.
@@ -20,6 +21,8 @@ func (k ComponentKey) String() string {
 
 // Graph is a fully resolved transitive component graph.
 type Graph struct {
+	// Root is the traversal root. Reference paths are computed from it; a zero Root yields no reference paths.
+	Root ComponentKey
 	// Descriptors contains the resolved descriptors, including the root.
 	Descriptors []*descriptor.Descriptor
 }
@@ -40,6 +43,11 @@ type Filtered struct {
 	// EmptyStage names the selector stage that emptied the result, or is
 	// empty for an ordinary result. Its values are the Stage constants.
 	EmptyStage string
+	// ReferencePaths holds the shortest reference path from the graph root per
+	// component, computed on the unfiltered graph so selectors never cut a path
+	// through a dropped intermediate. Nil when the graph has no root. Shared
+	// read-only.
+	ReferencePaths map[ComponentKey][]runtime.Identity
 }
 
 // Filter applies the reference, component, and resource selector stages of q
@@ -66,6 +74,8 @@ func (q *Query) Filter(ctx context.Context, graph Graph) (*Filtered, error) {
 			byKey[key] = d
 		}
 	}
+
+	paths := referencePaths(graph.Root, byKey)
 
 	survivors, err := q.filterReferences(ctx, byKey)
 	if err != nil {
@@ -101,7 +111,7 @@ func (q *Query) Filter(ctx context.Context, graph Graph) (*Filtered, error) {
 	}
 
 	// Lexicographic order by (component.name, component.version).
-	return &Filtered{Descriptors: sortByComponentKey(filtered)}, nil
+	return &Filtered{Descriptors: sortByComponentKey(filtered), ReferencePaths: paths}, nil
 }
 
 // filterReferences applies the reference selector stage. Without a selector all

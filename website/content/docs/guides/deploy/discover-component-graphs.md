@@ -171,6 +171,10 @@ The projected records appear in `status.extracted`:
 kubectl get discovery flux-images -o jsonpath='{.status.extracted}' | jq
 ```
 
+To turn these records into verified `Resource` objects — including the
+`referencePath` for resources in nested components — see
+[Create Verified Resources from a Discovery]({{< relref "create-resources-from-discovery.md" >}}).
+
 {{< /step >}}
 {{< /steps >}}
 

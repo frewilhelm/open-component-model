@@ -1,0 +1,122 @@
+components:
+  # Root release CV: pins the three product versions that form this release.
+  # Carries no resources. The component graph, not a deployment recipe,
+  # is the entire content of this file.
+  - name: example.com/observability-demo
+    version: "1.0.0"
+    provider:
+      name: example.com
+    componentReferences:
+      - name: podinfo
+        componentName: example.com/products/podinfo
+        version: "6.9.1"
+      - name: prometheus
+        componentName: example.com/products/prometheus
+        version: "29.47.0"
+      - name: grafana
+        componentName: example.com/products/grafana
+        version: "14.4.0"
+
+  # podinfo product
+  #
+  # Core image inventory (not exhaustive for all chart features):
+  #   image — the podinfo server
+  #
+  # Relevant chart value paths for later operator localization:
+  #   image.repository  — combined registry/repository
+  #   image.tag
+  - name: example.com/products/podinfo
+    version: "6.9.1"
+    provider:
+      name: example.com
+    resources:
+      - name: chart
+        type: helmChart
+        relation: local
+        version: "6.9.1"
+        input:
+          type: Helm/v1
+          path: ./tmp/products/podinfo-6.9.1.tgz
+      - name: image
+        type: ociImage
+        relation: external
+        version: "6.9.1"
+        access:
+          type: OCIImage/v1
+          imageReference: "ghcr.io/stefanprodan/podinfo:6.9.1@sha256:a40fbec5a9caea1879669ce59f9d3a08b68bccfd46fc9760994275c3ca6b4d0f"
+
+  # Prometheus product (standalone prometheus chart, not kube-prometheus-stack)
+  #
+  # Core image inventory (not exhaustive for all chart features):
+  #   server-image          — the Prometheus server
+  #   config-reloader-image — configmap-reload sidecar
+  #
+  # Alertmanager, kube-state-metrics, node-exporter and pushgateway are
+  # optional subchart features not included in this profile. Enabling them
+  # in an operator example requires their images to be added here first.
+  #
+  # Relevant chart value paths for later operator localization:
+  #   server.image.repository
+  #   server.image.tag
+  #   configmapReload.prometheus.image.repository
+  #   configmapReload.prometheus.image.tag
+  - name: example.com/products/prometheus
+    version: "29.47.0"
+    provider:
+      name: example.com
+    resources:
+      - name: chart
+        type: helmChart
+        relation: local
+        version: "29.47.0"
+        input:
+          type: Helm/v1
+          path: ./tmp/products/prometheus-29.47.0.tgz
+      - name: server-image
+        type: ociImage
+        relation: external
+        version: "v3.16.0"
+        access:
+          type: OCIImage/v1
+          imageReference: "quay.io/prometheus/prometheus:v3.16.0@sha256:89c1a644817e9ad70fa2af76c84898e327c1de7063735f962e8313b1e28672c3"
+      - name: config-reloader-image
+        type: ociImage
+        relation: external
+        version: "v0.95.1"
+        access:
+          type: OCIImage/v1
+          imageReference: "quay.io/prometheus-operator/prometheus-config-reloader:v0.95.1@sha256:15f6aec87a20e25f33371ebf9f37bfba33d783f8f7c7dcc3448720c1a5397c2c"
+
+  # Grafana product
+  #
+  # Core image inventory (not exhaustive for all chart features):
+  #   image — the Grafana server (distroless variant)
+  #
+  # The upstream Grafana chart separates registry and repository into two
+  # distinct fields (image.registry and image.repository). A combined
+  # registry/repository string written to image.repository alone is
+  # incorrect; the operator must handle both fields.
+  #
+  # Relevant chart value paths for later operator localization:
+  #   image.registry
+  #   image.repository
+  #   image.tag
+  - name: example.com/products/grafana
+    version: "14.4.0"
+    provider:
+      name: example.com
+    resources:
+      - name: chart
+        type: helmChart
+        relation: local
+        version: "14.4.0"
+        input:
+          type: Helm/v1
+          path: ./tmp/products/grafana-14.4.0.tgz
+      - name: image
+        type: ociImage
+        relation: external
+        version: "13.3.0-distroless"
+        access:
+          type: OCIImage/v1
+          imageReference: "docker.io/grafana/grafana:13.3.0-distroless@sha256:ffa50e781972f7862410639eed96e0a9ad96c94ebeccd43e634141f3d9605a99"

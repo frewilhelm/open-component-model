@@ -21,6 +21,8 @@ See the [installation notes in the root README](../README.md#installation) for d
 |---|---|---|
 | [`helm-simple`](#helm-simple) | FluxCD + ArgoCD | Minimal Helm chart deploy from an OCI artifact |
 | [`helm-nested`](#helm-nested) | FluxCD + ArgoCD | Helm chart buried in a nested OCM component reference |
+| [`discovery-resources`](#discovery-resources) | FluxCD | kro generates a verified `Resource` per chart from a `Discovery`'s extracted `referencePath` |
+| [`discovery-localization`](#discovery-localization) | FluxCD | Charts in another repository, resolved references read from `Resource` status, localized images |
 | [`helm-nested-signed`](#helm-nested-signed) | FluxCD + ArgoCD | Nested component with signature verification |
 | [`helm-signing`](#helm-signing) | FluxCD + ArgoCD | Deploying a signed Helm chart with key verification |
 | [`helm-simple-nested-status`](#helm-simple-nested-status) | FluxCD + ArgoCD | Exposing nested resource status fields through `additionalStatusFields` |
@@ -74,6 +76,88 @@ resource:
       name: helm-resource
     referencePath:
       - name: nested-chart
+```
+
+---
+
+## discovery-resources
+
+**Deployer:** FluxCD (one `OCIRepository` + `HelmRelease` per discovered chart)
+
+Like `helm-nested`, but the chart `Resource` objects are not hand-written. The `platform` component references
+two nested chart components (`chart-a` pinning podinfo 6.9.1, `chart-b` pinning podinfo 6.7.1), each carrying a
+`helm-resource`. A `Discovery` extracts one record per matching resource — including the `referencePath` of the
+nested component that owns it — and a kro `forEach` turns each record into a verified `Resource`, then fans out
+a FluxCD deployer chain per chart. The two charts deploy different podinfo versions, so the workloads are
+distinct. The `Resource` controller checks resource digests, configured root signatures, and available
+reference digests; the `Discovery` itself performs no signature or resource-content verification.
+
+```yaml
+extract:
+  byResources:
+    # slug is the reference-path leaf (chart-a / chart-b), used to name the Resource and release
+    slug: referencePath[size(referencePath) - 1].name
+    resource: '{"name": resource.name}'
+    referencePath: referencePath
+```
+
+This example has its own e2e test (`test/e2e/e2e_discovery_test.go`) and is excluded from the generic examples
+loop, because it deploys multiple charts rather than a single `<example>-podinfo` workload.
+
+```bash
+# Run this example in isolation
+task test/e2e -- --focus="Discovery Reference Path"
+```
+
+---
+
+## discovery-localization
+
+**Deployer:** FluxCD (one `OCIRepository` + `HelmRelease` per product)
+
+A four-component product release: podinfo serves the application, Prometheus scrapes it, and Grafana presents
+the results. The root component `example.com/observability-demo:1.0.0` references three product components
+(`podinfo:6.9.1`, `prometheus:29.47.0`, `grafana:14.4.0`), each carrying a chart and image resources with
+pinned upstream digests. Product components live in repository B (`subPath: discovery-localization-products`);
+the root lives in repository A. A `resolvers.config.ocm.software/v1alpha1` ConfigMap routes product names to
+repository B; `policy: Propagate` passes it through the Component to Discoveries and Resources.
+
+Two Discoveries — one for charts, one for images — extract one record per product resource with a one-hop
+`referencePath`. Inventory predicates require exactly three charts and four images (podinfo/image,
+prometheus/server-image, prometheus/config-reloader-image, grafana/image), each appearing once with path
+length one. Missing or unexpected records keep the instance pending.
+
+The RGD creates seven verified `Resource` objects (`verificationPolicy: Always`), three operator-owned Helm
+values ConfigMaps, a Grafana dashboard ConfigMap, three OCIRepositories, and three HelmReleases. Image values
+come exclusively from verified `Resource` status fields — no upstream image coordinates appear in the RGD.
+Each HelmRelease uses `valuesFrom` pointing at the per-product values ConfigMap. No `targetPath` or inline
+overrides are used.
+
+```bash
+# From the repository root: set up the development cluster if needed
+task bindings/go/kubernetes/controller:test/e2e/setup/local
+
+# Run the example with the included launcher
+task --dir bindings/go/kubernetes/controller/examples/discovery-localization run
+
+# Inspect running resources
+kubectl -n default get resources.delivery.ocm.software -l discovery.ocm.software/instance=discovery-localization
+kubectl -n default get ocirepositories,helmreleases -l discovery.ocm.software/instance=discovery-localization
+
+# Read the generated Grafana admin password
+kubectl -n default get secret discovery-localization-grafana \
+  -o jsonpath='{.data.admin-password}' | base64 -d && echo
+
+# Open the Podinfo Observability dashboard
+kubectl -n default port-forward service/discovery-localization-grafana 3000:80
+# http://localhost:3000/d/podinfo-observability
+```
+
+This example has its own e2e test (`test/e2e/e2e_discovery_localization_test.go`) and is excluded from the
+generic examples loop.
+
+```bash
+task test/e2e -- --focus="Discovery Cross-Repository Localization" --procs=1
 ```
 
 ---

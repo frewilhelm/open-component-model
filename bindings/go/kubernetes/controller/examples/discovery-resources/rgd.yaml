@@ -1,0 +1,93 @@
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: discovery-resources
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: DiscoveryResources
+    spec:
+      prefix: string | default="discovery-resources"
+  resources:
+    # A read-only Discovery projects one record per matching resource, including
+    # the referencePath to the (nested) component that owns it.
+    - id: discovery
+      readyWhen:
+        - ${discovery.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
+      template:
+        apiVersion: delivery.ocm.software/v1alpha1
+        kind: Discovery
+        metadata:
+          name: "${schema.spec.prefix}-charts"
+        spec:
+          componentRef:
+            name: discovery-resources-component
+          resourceSelector:
+            matchIdentity:
+              name: helm-resource
+          extract:
+            byResources:
+              # slug is the leaf of the reference path (e.g. chart-a), short and
+              # stable, used to name the generated Resource and Helm release.
+              slug: referencePath[size(referencePath) - 1].name
+              resource: '{"name": resource.name}'
+              referencePath: referencePath
+    # One verified Resource per discovered record. The record's resource and
+    # referencePath go straight into byReference; the Resource controller
+    # verifies each through its reference path.
+    - id: charts
+      forEach:
+        - rec: ${discovery.status.extracted}
+      template:
+        apiVersion: delivery.ocm.software/v1alpha1
+        kind: Resource
+        metadata:
+          name: ${schema.spec.prefix + '-' + rec.slug}
+        spec:
+          componentRef:
+            name: discovery-resources-component
+          resource:
+            byReference:
+              resource: ${rec.resource}
+              referencePath: ${rec.referencePath}
+          additionalStatusFields:
+            registry: resource.access.toOCI().registry
+            repository: resource.access.toOCI().repository
+            digest: resource.access.toOCI().digest
+            tag: resource.access.toOCI().tag
+    # One FluxCD OCIRepository per generated Resource, iterating the charts
+    # collection. Each release name embeds the discovered resource name, so the
+    # charts deploy to distinct workloads.
+    - id: ocirepositories
+      forEach:
+        - chart: ${charts}
+      template:
+        apiVersion: source.toolkit.fluxcd.io/v1
+        kind: OCIRepository
+        metadata:
+          name: ${chart.metadata.name + '-oci'}
+        spec:
+          interval: 1m0s
+          insecure: true
+          layerSelector:
+            mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+            operation: copy
+          url: oci://${chart.status.additional.registry}/${chart.status.additional.repository}
+          ref:
+            digest: ${chart.status.additional.digest}
+    - id: helmreleases
+      forEach:
+        - chart: ${charts}
+      template:
+        apiVersion: helm.toolkit.fluxcd.io/v2
+        kind: HelmRelease
+        metadata:
+          name: ${chart.metadata.name + '-hr'}
+        spec:
+          releaseName: ${chart.metadata.name}
+          interval: 1m
+          timeout: 5m
+          chartRef:
+            kind: OCIRepository
+            name: ${chart.metadata.name + '-oci'}
+            namespace: default

@@ -98,10 +98,11 @@ componentSelector:
 
 Set exactly one extraction mode under `spec.extract`. `extract: {}` is invalid.
 
-- **`byResources`** (bindings `component`, `resource`) — Each map value is a CEL
-  expression evaluated once per surviving `(component, resource)` pair.
-- **`byComponents`** (binding `component`) — Each map value is a CEL expression
-  evaluated once per surviving component.
+- **`byResources`** (bindings `component`, `resource`, `referencePath`) — Each
+  map value is a CEL expression evaluated once per surviving
+  `(component, resource)` pair.
+- **`byComponents`** (bindings `component`, `referencePath`) — Each map value is
+  a CEL expression evaluated once per surviving component.
 - **`expression`** (binding `components`) — A single CEL expression evaluated
   once over the complete filtered descriptor list; must return a list of objects.
 
@@ -115,6 +116,10 @@ Notes:
   objects with string keys.
 - All modes must return a list of objects. Anything else fails with
   `ExtractFailed`.
+- `referencePath` is the shortest reference path from the root component,
+  computed before selectors run, so a dropped intermediate never cuts it. It can
+  be used verbatim as a Resource's `spec.resource.byReference.referencePath`.
+  It is not bound in `expression` mode.
 
 ### Absent, null, and missing
 

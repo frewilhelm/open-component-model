@@ -1,0 +1,128 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: "3"
+
+vars:
+  OCM: '{{.OCM_CLI | default "ocm"}}'
+  REGISTRY_A: "http://ocm-e2e-image-registry:5000"
+  REGISTRY_B: "http://ocm-e2e-image-registry:5000/discovery-localization-products"
+  PREFIX: "discovery-localization"
+
+tasks:
+  prepare:
+    desc: Pull pinned upstream Helm chart archives into tmp/products and verify metadata.
+    cmds:
+      - mkdir -p tmp/products
+      - helm pull oci://ghcr.io/stefanprodan/charts/podinfo --version 6.9.1 --destination tmp/products
+      - helm pull prometheus --repo https://prometheus-community.github.io/helm-charts --version 29.47.0 --destination tmp/products
+      - helm pull grafana --repo https://grafana-community.github.io/helm-charts --version 14.4.0 --destination tmp/products
+      - |
+        name=$(helm show chart tmp/products/podinfo-6.9.1.tgz | grep '^name:' | awk '{print $2}')
+        ver=$(helm show chart tmp/products/podinfo-6.9.1.tgz | grep '^version:' | awk '{print $2}')
+        if [ "$name" != "podinfo" ] || [ "$ver" != "6.9.1" ]; then
+          echo "ERROR: podinfo chart metadata mismatch: name=$name version=$ver" >&2
+          exit 1
+        fi
+      - |
+        name=$(helm show chart tmp/products/prometheus-29.47.0.tgz | grep '^name:' | awk '{print $2}')
+        ver=$(helm show chart tmp/products/prometheus-29.47.0.tgz | grep '^version:' | awk '{print $2}')
+        if [ "$name" != "prometheus" ] || [ "$ver" != "29.47.0" ]; then
+          echo "ERROR: prometheus chart metadata mismatch: name=$name version=$ver" >&2
+          exit 1
+        fi
+      - |
+        name=$(helm show chart tmp/products/grafana-14.4.0.tgz | grep '^name:' | awk '{print $2}')
+        ver=$(helm show chart tmp/products/grafana-14.4.0.tgz | grep '^version:' | awk '{print $2}')
+        if [ "$name" != "grafana" ] || [ "$ver" != "14.4.0" ]; then
+          echo "ERROR: grafana chart metadata mismatch: name=$name version=$ver" >&2
+          exit 1
+        fi
+
+  run:
+    desc: |
+      Build, publish and deploy the observability-demo product release.
+      Requires the existing kind-ocm-e2e development cluster with OCM controller, Flux and kro installed.
+      Prints the Grafana Secret lookup and port-forward commands when done.
+
+      If an old discovery-localization-deployer NamespacedDeployer is present from a previous
+      demo run, remove the old objects first:
+        kubectl delete discoverylocalization/discovery-localization --ignore-not-found
+        kubectl delete namespaceddeployer/discovery-localization-deployer --ignore-not-found
+        kubectl delete resource.delivery.ocm.software/discovery-localization-resource-nested-rgd --ignore-not-found
+        kubectl delete clusterrolebinding/discovery-localization-deployer --ignore-not-found
+        kubectl delete clusterrole/discovery-localization-deployer --ignore-not-found
+        kubectl delete serviceaccount/discovery-localization-deployer --ignore-not-found
+    cmds:
+      - |
+        ctx=$(kubectl config current-context 2>/dev/null || true)
+        if [ "$ctx" != "kind-ocm-e2e" ]; then
+          echo "ERROR: expected kubectl context kind-ocm-e2e, got: $ctx" >&2
+          echo "Set up the development cluster with: task bindings/go/kubernetes/controller:test/e2e/setup/local" >&2
+          exit 1
+        fi
+      - |
+        if kubectl get namespaceddeployer/discovery-localization-deployer -n default >/dev/null 2>&1; then
+          echo "ERROR: old NamespacedDeployer 'discovery-localization-deployer' is present." >&2
+          echo "Remove the old demo objects before running this command:" >&2
+          echo "  kubectl delete discoverylocalization/discovery-localization --ignore-not-found" >&2
+          echo "  kubectl delete namespaceddeployer/discovery-localization-deployer --ignore-not-found" >&2
+          echo "  kubectl delete resource.delivery.ocm.software/discovery-localization-resource-nested-rgd --ignore-not-found" >&2
+          echo "  kubectl delete clusterrolebinding/discovery-localization-deployer --ignore-not-found" >&2
+          echo "  kubectl delete clusterrole/discovery-localization-deployer --ignore-not-found" >&2
+          echo "  kubectl delete serviceaccount/discovery-localization-deployer --ignore-not-found" >&2
+          exit 1
+        fi
+      - |
+        kubectl api-resources --api-group=delivery.ocm.software >/dev/null 2>&1 || {
+          echo "ERROR: OCM controller APIs not installed" >&2
+          exit 1
+        }
+      - |
+        kubectl api-resources --api-group=helm.toolkit.fluxcd.io >/dev/null 2>&1 || {
+          echo "ERROR: Flux APIs not installed" >&2
+          exit 1
+        }
+      - |
+        kubectl api-resources --api-group=kro.run >/dev/null 2>&1 || {
+          echo "ERROR: kro APIs not installed" >&2
+          exit 1
+        }
+      - task: prepare
+      - |
+        WORK=$(mktemp -d ./tmp/product-release-ctf.XXXXXX)
+        echo "Building CTF in $WORK ..."
+        {{.OCM}} add cv --repository "$WORK/ctf" --constructor component-constructor.yaml
+
+        echo "Transferring product CVs to repository B ..."
+        {{.OCM}} transfer cv "ctf::$WORK/ctf//example.com/products/podinfo:6.9.1" \
+          "{{.REGISTRY_B}}" --copy-resources --config uploader.yaml
+        {{.OCM}} transfer cv "ctf::$WORK/ctf//example.com/products/prometheus:29.47.0" \
+          "{{.REGISTRY_B}}" --copy-resources --config uploader.yaml
+        {{.OCM}} transfer cv "ctf::$WORK/ctf//example.com/products/grafana:14.4.0" \
+          "{{.REGISTRY_B}}" --copy-resources --config uploader.yaml
+
+        echo "Transferring root CV to repository A ..."
+        {{.OCM}} transfer cv "ctf::$WORK/ctf//example.com/observability-demo:1.0.0" \
+          "{{.REGISTRY_A}}"
+      - kubectl apply -f bootstrap.yaml
+      - kubectl wait --for=condition=Ready component/discovery-localization-component --timeout=5m
+      - kubectl apply -f rgd.yaml
+      - kubectl wait --for=condition=Ready rgd/discovery-localization --timeout=5m
+      - kubectl wait --for=condition=Established crd/discoverylocalizations.kro.run --timeout=5m
+      - kubectl apply -f instance.yaml
+      - kubectl wait --for=create discoverylocalization/discovery-localization --timeout=5m
+      - kubectl wait --for=condition=Ready discoverylocalization/discovery-localization --timeout=5m
+      - kubectl wait --for=condition=Ready helmrelease/{{.PREFIX}}-podinfo-hr -n default --timeout=5m
+      - kubectl wait --for=condition=Ready helmrelease/{{.PREFIX}}-prometheus-hr -n default --timeout=5m
+      - kubectl wait --for=condition=Ready helmrelease/{{.PREFIX}}-grafana-hr -n default --timeout=5m
+      - |
+        echo ""
+        echo "=== Observability demo deployed ==="
+        echo ""
+        echo "Grafana admin credentials:"
+        echo "  kubectl -n default get secret {{.PREFIX}}-grafana -o jsonpath='{.data.admin-user}' | base64 -d && echo"
+        echo "  kubectl -n default get secret {{.PREFIX}}-grafana -o jsonpath='{.data.admin-password}' | base64 -d && echo"
+        echo ""
+        echo "Port-forward and open the Podinfo Observability dashboard:"
+        echo "  kubectl -n default port-forward service/{{.PREFIX}}-grafana 3000:80"
+        echo "  open http://localhost:3000/d/podinfo-observability"
+        echo ""

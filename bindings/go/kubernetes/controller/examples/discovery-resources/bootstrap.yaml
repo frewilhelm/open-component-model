@@ -1,0 +1,73 @@
+apiVersion: delivery.ocm.software/v1alpha1
+kind: Repository
+metadata:
+  name: discovery-resources-repository
+spec:
+  repositorySpec:
+    # Adjust to your OCM repository
+    baseUrl: http://ocm-e2e-image-registry:5000
+    type: OCIRegistry
+  interval: 10m
+---
+apiVersion: delivery.ocm.software/v1alpha1
+kind: Component
+metadata:
+  name: discovery-resources-component
+spec:
+  component: ocm.software/ocm-k8s-toolkit/examples/discovery-resources
+  repositoryRef:
+    name: discovery-resources-repository
+  semver: 1.0.0
+  interval: 10m
+---
+apiVersion: delivery.ocm.software/v1alpha1
+kind: Resource
+metadata:
+  name: discovery-resources-resource-nested-rgd
+spec:
+  componentRef:
+    name: discovery-resources-component
+  resource:
+    byReference:
+      resource:
+        name: kro-rgd
+      referencePath:
+        - name: nested-rgd
+---
+# The NamespacedDeployer applies the cluster-scoped ResourceGraphDefinition with the permissions of this
+# service account, so it needs a ClusterRole for ResourceGraphDefinitions.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: discovery-resources-deployer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: discovery-resources-deployer
+rules:
+  - apiGroups: ["kro.run"]
+    resources: ["resourcegraphdefinitions"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: discovery-resources-deployer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: discovery-resources-deployer
+subjects:
+  - kind: ServiceAccount
+    name: discovery-resources-deployer
+    namespace: default
+---
+apiVersion: delivery.ocm.software/v1alpha1
+kind: NamespacedDeployer
+metadata:
+  name: discovery-resources-deployer
+spec:
+  resourceRef:
+    name: discovery-resources-resource-nested-rgd
+  serviceAccountName: discovery-resources-deployer

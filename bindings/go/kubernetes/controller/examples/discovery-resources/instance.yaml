@@ -1,0 +1,6 @@
+apiVersion: kro.run/v1alpha1
+kind: DiscoveryResources
+metadata:
+  name: discovery-resources
+spec:
+  prefix: discovery-resources
